@@ -22,7 +22,7 @@ with the exploit of your choise.
 john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9020 < elfldr.elf
 ```
 
-This will start a new socket server from the `SceRedisServer` process that accepts
+This will start a new socket server from the `ScePartyDaemon` process that accepts
 ELFs on port 9021:
 ```console
 john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9021 < hello_world.elf
