@@ -152,6 +152,18 @@ close(int fd) {
 }
 
 
+int
+dup(int oldfd) {
+  return (int)syscall(SYS_dup, oldfd);
+}
+
+
+int
+dup2(int oldfd, int newfd) {
+  return (int)syscall(SYS_dup2, oldfd, newfd);
+}
+
+
 pid_t
 getpid(void) {
   return (pid_t)syscall(SYS_getpid);
@@ -180,6 +192,36 @@ int
 sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,
        const void *newp, size_t newlen) {
   return syscall(SYS___sysctl, name, namelen, oldp, oldlenp, newp, newlen);
+}
+
+
+int
+jitshm_create(const char* name, size_t size, int flags) {
+  return (int)syscall(0x215, name, size, flags);
+}
+
+
+int
+jitshm_alias(int fd, int flags) {
+  return (int)syscall(0x216, fd, flags);
+}
+
+
+void*
+mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off) {
+  return (void*)syscall(SYS_mmap, addr, len, prot, flags, fd, off);
+}
+
+
+int
+munmap(void* addr, size_t len) {
+  return (int)syscall(SYS_munmap, addr, len);
+}
+
+
+int
+mprotect(void* addr, size_t len, int prot) {
+  return (int)syscall(SYS_mprotect, addr, len, prot);
 }
 
 

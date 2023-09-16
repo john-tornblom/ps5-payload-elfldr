@@ -16,7 +16,8 @@ along with this program; see the file COPYING. If not, see
 
 #pragma once
 
-#include "payload.h"
+#include "libc.h"
 
-int elfldr_socksrv(const payload_args_t *args);
+int bootstrap_exec(const char* procname, uint8_t *elf, size_t size);
+
 

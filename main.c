@@ -14,8 +14,10 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
+#include "bootstrap.h"
 #include "elfldr.h"
 #include "kern.h"
+#include "payload.h"
 
 #ifdef ELFLDR_BOOTSTRAP
 #include "elfldr-socksrv_elf.c"
@@ -23,8 +25,11 @@ along with this program; see the file COPYING. If not, see
 
 
 int
-main() {
+main(const payload_args_t *args) {
   uint8_t qa_flags[16];
+  pid_t pid = getpid();
+  uint64_t authid;
+  int ret;
 
   // enable debugging
   if(kern_get_qa_flags(qa_flags)) {
@@ -34,15 +39,24 @@ main() {
   if(kern_set_qa_flags(qa_flags)) {
     return -1;
   }
-  if(kern_set_ucred_auth_id(getpid(), 0x4800000000010003l)) {
+
+  // change auth id
+  if(kern_get_ucred_auth_id(pid, &authid)) {
+    return -1;
+  }
+  if(kern_set_ucred_auth_id(pid, 0x4800000000010003l)) {
     return -1;
   }
 
 #ifdef ELFLDR_BOOTSTRAP
-  return elfldr_exec("ScePartyDaemon", elfldr_socksrv_elf,
-		     elfldr_socksrv_elf_len);
+  ret = bootstrap_exec("ScePartyDaemon", elfldr_socksrv_elf, elfldr_socksrv_elf_len);
 #else
-  return elfldr_spawn_server("SceRedisServer");
+  ret = elfldr_socksrv(args);
 #endif
+
+  // restore auth id
+  kern_set_ucred_auth_id(pid, authid);
+
+  return ret;
 }
 

@@ -33,6 +33,18 @@ along with this program; see the file COPYING. If not, see
 #define SOL_SOCKET   0xffff
 #define SO_REUSEADDR 0x0004
 
+#define PAGE_SIZE 0x4000
+
+#define PROT_NONE  0x0
+#define PROT_READ  0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC  0x4
+
+#define MAP_SHARED    0x1
+#define MAP_PRIVATE   0x2
+#define MAP_FIXED     0x10
+#define MAP_ANONYMOUS 0x1000
+
 #define errno (geterrno())
 
 
@@ -93,8 +105,9 @@ int bind(int fd, const struct sockaddr_in *addr, socklen_t addr_len);
 int accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len);
 
 pid_t getpid(void);
-pid_t getppid(void);
 pid_t waitpid(pid_t pid, int *status, int opts);
+int dup(int oldfd);
+int dup2(int oldfd, int newfd);
 
 int ptrace(int request, pid_t pid, intptr_t addr, int data);
 
@@ -115,3 +128,10 @@ int sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,
 
 int pthread_create(pthread_t *trd, const pthread_attr_t *attr,
 		   void *(*func) (void *), void *arg);
+
+int jitshm_create(const char* name, size_t size, int flags);
+int jitshm_alias(int fd, int flags);
+
+void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off);
+int   munmap(void* addr, size_t len);
+int   mprotect(void* addr, size_t len, int prot);

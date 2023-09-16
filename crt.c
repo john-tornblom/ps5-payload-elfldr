@@ -19,7 +19,7 @@ along with this program; see the file COPYING. If not, see
 
 extern int libc_init(const payload_args_t *args);
 extern int kern_init(const payload_args_t *args);
-extern int main(int argc, char* argv[], char *envp[]);
+extern int main(const payload_args_t *args);
 
 
 void
@@ -31,5 +31,5 @@ _start(payload_args_t *args) {
     return;
   }
 
-  *args->payloadout = main(0, 0, 0);
+  *args->payloadout = main(args);
 }
