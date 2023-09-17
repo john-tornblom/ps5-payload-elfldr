@@ -30,6 +30,7 @@ static char* (*sce_strcpy)(const char*, const char*);
 static int   (*sce_strcmp)(const char*, const char*);
 static int   (*sce_strncmp)(const char*, const char*, size_t);
 static int   (*sce_htons)(uint16_t);
+static int   (*sce_sleep)(int);
 static int   (*sce_pthread_create)(pthread_t*, const pthread_attr_t*,
 				   void *(*func) (void *), void *);
 
@@ -59,6 +60,9 @@ libc_init(const payload_args_t *args) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "htons", &sce_htons))) {
+    return error;
+  }
+  if((error=args->sceKernelDlsym(0x2001, "sleep", &sce_sleep))) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "pthread_create", &sce_pthread_create))) {
@@ -276,6 +280,12 @@ strncmp(const char *s1, const char *s2, size_t len) {
 uint16_t
 htons(uint16_t val) {
   return sce_htons(val);
+}
+
+
+uint32_t
+sleep(uint32_t seconds) {
+  return sce_sleep(seconds);
 }
 
 

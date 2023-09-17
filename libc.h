@@ -98,8 +98,6 @@ int socket(int dom, int ty, int proto);
 int setsockopt(int fd, int lvl, int name, const void *val,
 	       unsigned int len);
 
-uint32_t htonl(uint32_t hostlong);
-
 int listen(int fd, int backlog);
 int bind(int fd, const struct sockaddr_in *addr, socklen_t addr_len);
 int accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len);
@@ -122,6 +120,7 @@ int strcmp(const char* s1, const char* s2);
 int strncmp(const char *s1, const char *s2, size_t n);
 
 uint16_t htons(uint16_t val);
+uint32_t sleep(uint32_t seconds);
 
 int sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,
 	   const void *newp, size_t newlen);

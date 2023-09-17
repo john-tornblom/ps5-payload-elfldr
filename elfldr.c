@@ -242,7 +242,7 @@ elfldr_serve(const payload_args_t *args, uint16_t port) {
   addr_len = sizeof(client_addr);
   while(1) {
     if((connfd=accept(srvfd, &client_addr, &addr_len)) < 0) {
-      continue;
+      return -1;
     }
 
     if((size=elfldr_read(connfd, &elf))) {
@@ -265,7 +265,10 @@ elfldr_serve(const payload_args_t *args, uint16_t port) {
 
 static void*
 elfldr_thread(void *args) {
-  elfldr_serve((const payload_args_t *)args, 9021);
+  while(1) {
+    elfldr_serve((const payload_args_t *)args, 9021);
+    sleep(10);
+  }
   return 0;
 }
 
