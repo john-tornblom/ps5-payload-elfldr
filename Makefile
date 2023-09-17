@@ -1,5 +1,4 @@
 PS5_HOST ?= ps5
-PS5_PORT ?= 9020
 
 CC := clang
 LD := ld.lld
@@ -10,7 +9,7 @@ LDFLAGS := -pie -T elf_x86_64.x
 
 OBJS := crt.o libc.o kern.o dynlib.o pt.o bootstrap.o elfldr.o
 
-all: elfldr.elf
+all: elfldr.elf hello_world.elf
 
 elfldr-socksrv_elf.c: elfldr-socksrv.elf
 	xxd -i $^ > $@
@@ -19,6 +18,9 @@ elfldr-socksrv.elf: $(OBJS) main-socksrv.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
 elfldr.elf: $(OBJS) main.o
+	$(LD) $(LDFLAGS) -o $@ $^
+
+hello_world.elf: hello_world.o
 	$(LD) $(LDFLAGS) -o $@ $^
 
 main-socksrv.o: main.c
@@ -33,6 +35,6 @@ main.o: main.c elfldr-socksrv_elf.c
 clean:
 	rm -f *.o *.elf elfldr-socksrv_elf.c
 
-test: elfldr.elf
-	nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
-
+test: elfldr.elf hello_world.elf
+	nc -q0 $(PS5_HOST) 9020 < elfldr.elf
+	nc -q0 $(PS5_HOST) 9021 < hello_world.elf
