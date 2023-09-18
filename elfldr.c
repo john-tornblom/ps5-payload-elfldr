@@ -276,5 +276,7 @@ elfldr_thread(void *args) {
 int
 elfldr_socksrv(const payload_args_t *args) {
   pthread_t trd;
+
+  signal(SIGCHLD, SIG_IGN);
   return pthread_create(&trd, 0, elfldr_thread, (void*)args);
 }

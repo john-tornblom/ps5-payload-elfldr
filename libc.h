@@ -45,6 +45,9 @@ along with this program; see the file COPYING. If not, see
 #define MAP_FIXED     0x10
 #define MAP_ANONYMOUS 0x1000
 
+#define SIGCHLD 20
+#define SIG_IGN (void*)1
+
 #define errno (geterrno())
 
 
@@ -134,3 +137,5 @@ int jitshm_alias(int fd, int flags);
 void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off);
 int   munmap(void* addr, size_t len);
 int   mprotect(void* addr, size_t len, int prot);
+
+void* signal(int num, void* handler);

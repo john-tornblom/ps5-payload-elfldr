@@ -31,9 +31,9 @@ static int   (*sce_strcmp)(const char*, const char*);
 static int   (*sce_strncmp)(const char*, const char*, size_t);
 static int   (*sce_htons)(uint16_t);
 static int   (*sce_sleep)(int);
+static void* (*sce_signal)(int, void*);
 static int   (*sce_pthread_create)(pthread_t*, const pthread_attr_t*,
 				   void *(*func) (void *), void *);
-
 
 static intptr_t sce_syscall;
 asm(".intel_syntax noprefix\n"
@@ -66,6 +66,9 @@ libc_init(const payload_args_t *args) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "pthread_create", &sce_pthread_create))) {
+    return error;
+  }
+  if((error=args->sceKernelDlsym(0x2001, "signal", &sce_signal))) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "getpid", &sce_syscall))) {
@@ -294,3 +297,10 @@ pthread_create(pthread_t *trd, const pthread_attr_t *attr,
 	       void *(*func) (void *), void *arg) {
   return sce_pthread_create(trd, attr, func, arg);
 }
+
+
+void*
+signal(int num, void* handler) {
+  return sce_signal(num, handler);
+}
+
