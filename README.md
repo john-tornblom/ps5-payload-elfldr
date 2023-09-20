@@ -4,7 +4,9 @@ This is an ELF loader for PS5 systems that have been jailbroken using either the
 Unlike the ELF loaders bundled with those exploits, this one uses the ptrace
 syscall to load itself into the `ScePartyDaemon` process, hence will continue
 running in the background even when playing games. Furthermore, this ELF loader
-will also resume its execution when the PS5 returns from rest mode.
+will also resume its execution when the PS5 returns from rest mode. Payloads that
+are loaded are executed in the `SceRedisServer` process, so if the payload crashes,
+the ELF loader will keep on running.
 
 ## Building
 On Debian-flavored operating systems, one can invoke the following commands to

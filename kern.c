@@ -396,7 +396,6 @@ kern_inc_so_count(pid_t pid, int fd) {
   }
 
   so_count++;
-  so_count = 0x100;
   if(kern_copyin(&so_count, file, sizeof(so_count))) {
     return -1;
   }

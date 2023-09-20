@@ -16,15 +16,15 @@ along with this program; see the file COPYING. If not, see
 
 #pragma once
 
+#define AF_UNIX  1
+#define AF_INET  2
+#define AF_INET6 28
 
-#define	AF_INET             2
-#define	AF_INET6            28
+#define SOCK_STREAM 1
+#define SOCK_DGRAM  2
 
-#define	SOCK_STREAM         1
-#define	SOCK_DGRAM          2
-
-#define IPPROTO_UDP         17
-#define IPPROTO_IPV6        41
+#define IPPROTO_UDP  17
+#define IPPROTO_IPV6 41
 
 #define IPV6_2292PKTOPTIONS 25
 #define IPV6_PKTINFO        46
@@ -32,6 +32,7 @@ along with this program; see the file COPYING. If not, see
 
 #define SOL_SOCKET   0xffff
 #define SO_REUSEADDR 0x0004
+#define SCM_RIGHTS   0x01
 
 #define PAGE_SIZE 0x4000
 
@@ -47,6 +48,10 @@ along with this program; see the file COPYING. If not, see
 
 #define SIGCHLD 20
 #define SIG_IGN (void*)1
+
+#define RFPROC   (1<<4)
+#define RFNOWAIT (1<<6)
+#define RFCFDG   (1<<12)
 
 #define errno (geterrno())
 
@@ -89,6 +94,28 @@ struct sockaddr_in {
   uint8_t sin_zero[8];
 };
 
+struct sockaddr_un {
+  uint8_t sun_len;
+  uint8_t sun_family;
+  char sun_path[104];
+};
+
+struct msghdr {
+  void *msg_name;
+  socklen_t msg_namelen;
+  struct iovec *msg_iov;
+  int msg_iovlen;
+  void *msg_control;
+  socklen_t msg_controllen;
+  int msg_flags;
+};
+
+struct cmsghdr {
+  socklen_t cmsg_len;
+  int cmsg_level;
+  int cmsg_type;
+};
+
 
 long syscall(int, ...);
 int geterrno(void);
@@ -104,6 +131,7 @@ int setsockopt(int fd, int lvl, int name, const void *val,
 int listen(int fd, int backlog);
 int bind(int fd, const struct sockaddr_in *addr, socklen_t addr_len);
 int accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len);
+ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
 
 pid_t getpid(void);
 pid_t waitpid(pid_t pid, int *status, int opts);
@@ -138,4 +166,5 @@ void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off);
 int   munmap(void* addr, size_t len);
 int   mprotect(void* addr, size_t len, int prot);
 
+int unlink(const char *pathname);
 void* signal(int num, void* handler);

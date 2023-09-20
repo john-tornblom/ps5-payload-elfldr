@@ -14,12 +14,23 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
+#include "dynlib.h"
 #include "elf.h"
 #include "kern.h"
 #include "libc.h"
-#include "payload.h"
+#include "pt.h"
 
 
+/**
+ * Parameters for the ELF loader.
+ **/
+#define ELFLDR_PORT 9021
+#define ELFLDR_UNIX_SOCKET "/system_tmp/elfldr.sock"
+
+
+/**
+ * Convenient macros.
+ **/
 #define ROUND_PG(x) (((x) + (PAGE_SIZE - 1)) & ~(PAGE_SIZE - 1))
 #define TRUNC_PG(x) ((x) & ~(PAGE_SIZE - 1))
 #define PFLAGS(x)   ((((x) & PF_R) ? PROT_READ  : 0) | \
@@ -28,30 +39,26 @@ along with this program; see the file COPYING. If not, see
 
 
 /**
- * Load an ELF into memory, and jump to its entry point.
+ * Load an ELF into the address space of a process with the given pid.
  **/
 static intptr_t
-elfldr_exec(const payload_args_t *args, uint8_t *elf, size_t size) {
-  uint8_t priv_caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-			   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-  uint8_t prev_caps[16];
+elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)elf;
   Elf64_Phdr *phdr = (Elf64_Phdr*)(elf + ehdr->e_phoff);
   Elf64_Shdr *shdr = (Elf64_Shdr*)(elf + ehdr->e_shoff);
 
-  void* base_addr = (void*)-1;
+  intptr_t base_addr = -1;
   size_t base_size = 0;
 
   size_t min_vaddr = -1;
   size_t max_vaddr = 0;
 
-  pid_t pid = getpid();
   int error = 0;
 
   // Sanity check, we only support 64bit ELFs.
   if(ehdr->e_ident[0] != 0x7f || ehdr->e_ident[1] != 'E' ||
      ehdr->e_ident[2] != 'L'  || ehdr->e_ident[3] != 'F') {
-    return -1;
+    return 0;
   }
 
   // Compute size of virtual memory region.
@@ -77,25 +84,22 @@ elfldr_exec(const payload_args_t *args, uint8_t *elf, size_t size) {
   if(ehdr->e_type == ET_DYN) {
     base_addr = 0;
   } else if(ehdr->e_type == ET_EXEC) {
-    base_addr = (void*)min_vaddr;
+    base_addr = min_vaddr;
     flags |= MAP_FIXED;
   } else {
-    return -1;
+    return 0;
   }
 
   // Reserve an address space of sufficient size.
-  if((base_addr=mmap(base_addr, base_size, PROT_NONE,
-		     flags, -1, 0)) == (void*)-1) {
-    return -1;
+  if((base_addr=pt_mmap(pid, base_addr, base_size, PROT_NONE,
+			flags, -1, 0)) == -1) {
+    return 0;
   }
-
-  kern_get_ucred_caps(pid, prev_caps);
-  kern_set_ucred_caps(pid, priv_caps);
 
   // Commit segments to reserved address space.
   for(int i=0; i<ehdr->e_phnum; i++) {
     size_t aligned_memsz = ROUND_PG(phdr[i].p_memsz);
-    void* addr = base_addr + phdr[i].p_vaddr;
+    intptr_t addr = base_addr + phdr[i].p_vaddr;
     int alias_fd = -1;
     int shm_fd = -1;
 
@@ -104,41 +108,48 @@ elfldr_exec(const payload_args_t *args, uint8_t *elf, size_t size) {
     }
 
     if(phdr[i].p_flags & PF_X) {
-      if((shm_fd=jitshm_create(0, aligned_memsz,
-			       PROT_WRITE | PFLAGS(phdr[i].p_flags))) < 0) {
-	error = -1;
+      if((shm_fd=pt_jitshm_create(pid, 0, aligned_memsz,
+				  PROT_WRITE | PFLAGS(phdr[i].p_flags))) < 0) {
+	error = 1;
 	break;
       }
 
-      if((addr=mmap((void*)addr, aligned_memsz, PFLAGS(phdr[i].p_flags),
-		    MAP_FIXED | MAP_SHARED, shm_fd, 0)) == (void*)-1) {
-	error = -1;
+      if((addr=pt_mmap(pid, addr, aligned_memsz, PFLAGS(phdr[i].p_flags),
+		       MAP_FIXED | MAP_SHARED, shm_fd, 0)) == -1) {
+	error = 1;
 	break;
       }
 
-      if((alias_fd=jitshm_alias(shm_fd, PROT_WRITE | PROT_READ)) < 0) {
-	error = -1;
+      if((alias_fd=pt_jitshm_alias(pid, shm_fd, PROT_WRITE | PROT_READ)) < 0) {
+	error = 1;
 	break;
       }
 
-      if((addr=mmap(0, aligned_memsz, PROT_WRITE | PROT_READ,
-		    MAP_SHARED, alias_fd, 0)) == (void*)-1) {
-	error = -1;
+      if((addr=pt_mmap(pid, 0, aligned_memsz, PROT_WRITE | PROT_READ,
+		       MAP_SHARED, alias_fd, 0)) == -1) {
+	error = 1;
 	break;
       }
 
-      memcpy(addr, elf + phdr[i].p_offset, phdr[i].p_memsz);
-      munmap(addr, aligned_memsz);
-      close(alias_fd);
-      close(shm_fd);
+      if(pt_copyin(pid, elf + phdr[i].p_offset, addr, phdr[i].p_memsz)) {
+	error = 1;
+	break;
+      }
+
+      pt_munmap(pid, addr, aligned_memsz);
+      pt_close(pid, alias_fd);
+      pt_close(pid, shm_fd);
     } else {
-      if((addr=mmap(addr, aligned_memsz, PROT_WRITE,
-		    MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
-		    -1, 0)) == (void*)-1) {
-	error = -1;
+      if((addr=pt_mmap(pid, addr, aligned_memsz, PROT_WRITE,
+		       MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
+		       -1, 0)) == -1) {
+	error = 1;
 	break;
       }
-      memcpy(addr, elf + phdr[i].p_offset, phdr[i].p_memsz);
+      if(pt_copyin(pid, elf + phdr[i].p_offset, addr, phdr[i].p_memsz)) {
+	error = 1;
+	break;
+      }
     }
   }
 
@@ -151,8 +162,12 @@ elfldr_exec(const payload_args_t *args, uint8_t *elf, size_t size) {
     Elf64_Rela* rela = (Elf64_Rela*)(elf + shdr[i].sh_offset);
     for(int j=0; j<shdr[i].sh_size/sizeof(Elf64_Rela); j++) {
       if((rela[j].r_info & 0xffffffffl) == R_X86_64_RELATIVE) {
-	uint64_t* value_addr = (base_addr + rela[j].r_offset);
-	*value_addr = (uint64_t)base_addr + rela[j].r_addend;
+	intptr_t value_addr = (base_addr + rela[j].r_offset);
+	intptr_t value = base_addr + rela[j].r_addend;
+	if(pt_copyin(pid, &value, value_addr, 8)) {
+	  error = 1;
+	  break;
+	}
       }
     }
   }
@@ -160,30 +175,322 @@ elfldr_exec(const payload_args_t *args, uint8_t *elf, size_t size) {
   // Set protection bits on mapped segments.
   for(int i=0; i<ehdr->e_phnum && !error; i++) {
     size_t aligned_memsz = ROUND_PG(phdr[i].p_memsz);
-    void* addr = base_addr + phdr[i].p_vaddr;
+    intptr_t addr = base_addr + phdr[i].p_vaddr;
 
     if(phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0) {
       continue;
     }
 
-    if(mprotect(addr, aligned_memsz, PFLAGS(phdr[i].p_flags))) {
-      error = -1;
+    if(pt_mprotect(pid, addr, aligned_memsz, PFLAGS(phdr[i].p_flags))) {
+      error = 1;
       break;
     }
   }
 
-  if(!error) {
-    int (*_start)(const payload_args_t *) = base_addr + ehdr->e_entry;
-    _start(args);
+  if(error) {
+    pt_munmap(pid, base_addr, base_size);
+    return 0;
   }
 
-  munmap(base_addr, base_size);
-  kern_set_ucred_caps(pid, prev_caps);
-
-  return error;
+  return base_addr + ehdr->e_entry;
 }
 
 
+/**
+ * Create payload args in the address space of the process with the given pid.
+ **/
+intptr_t
+elfldr_args(pid_t pid) {
+  int victim_sock;
+  int master_sock;
+  intptr_t buf;
+  int pipe0;
+  int pipe1;
+
+  if((buf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    return 0;
+  }
+
+  if((master_sock=pt_socket(pid, AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+    return 0;
+  }
+
+  pt_setint(pid, buf+0x00, 20);
+  pt_setint(pid, buf+0x04, IPPROTO_IPV6);
+  pt_setint(pid, buf+0x08, IPV6_TCLASS);
+  pt_setint(pid, buf+0x0c, 0);
+  pt_setint(pid, buf+0x10, 0);
+  pt_setint(pid, buf+0x14, 0);
+  if(pt_setsockopt(pid, master_sock, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, buf, 24)) {
+    return 0;
+  }
+
+  if((victim_sock=pt_socket(pid, AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+    return 0;
+  }
+
+  pt_setint(pid, buf+0x00, 0);
+  pt_setint(pid, buf+0x04, 0);
+  pt_setint(pid, buf+0x08, 0);
+  pt_setint(pid, buf+0x0c, 0);
+  pt_setint(pid, buf+0x10, 0);
+  if(pt_setsockopt(pid, victim_sock, IPPROTO_IPV6, IPV6_PKTINFO, buf, 20)) {
+    return 0;
+  }
+
+  if(kern_overlap_sockets(pid, master_sock, victim_sock)) {
+    return 0;
+  }
+
+  if(pt_pipe(pid, buf)) {
+    return 0;
+  }
+  pipe0 = pt_getint(pid, buf);
+  pipe1 = pt_getint(pid, buf+4);
+
+  intptr_t args       = buf;
+  intptr_t dlsym      = dynlib_resolve_sceKernelDlsym(pid);
+  intptr_t rwpipe     = buf + 0x100;
+  intptr_t rwpair     = buf + 0x200;
+  intptr_t kpipe_addr = kern_get_proc_file(pid, pipe0);
+  intptr_t payloadout = buf + 0x300;
+
+  pt_setlong(pid, args + 0x00, dlsym);
+  pt_setlong(pid, args + 0x08, rwpipe);
+  pt_setlong(pid, args + 0x10, rwpair);
+  pt_setlong(pid, args + 0x18, kpipe_addr);
+  pt_setlong(pid, args + 0x20, kern_get_data_baseaddr());
+  pt_setlong(pid, args + 0x28, payloadout);
+  pt_setint(pid, rwpipe + 0, pipe0);
+  pt_setint(pid, rwpipe + 4, pipe1);
+  pt_setint(pid, rwpair + 0, master_sock);
+  pt_setint(pid, rwpair + 4, victim_sock);
+  pt_setint(pid, payloadout, 0);
+
+  return args;
+}
+
+
+/**
+ * Get the name of a process with the given pid.
+ **/
+static int
+elfldr_get_procname(pid_t pid, char* name) {
+  int mib[4] = {1, 14, 1, pid};
+  size_t ki_size = 1096;
+  char ki_buf[ki_size];
+
+  if(sysctl(mib, 4, ki_buf, &ki_size, 0, 0) < 0) {
+    return -1;
+  }
+
+  strcpy(name, ki_buf + 447);
+
+  return 0;
+}
+
+
+/**
+ * Get the pif of a process with the given name.
+ **/
+static pid_t
+elfldr_find_pid(const char* name) {
+  char procname[255];
+
+  for(pid_t pid=1; pid<10000; pid++) {
+    if(elfldr_get_procname(pid, procname) < 0) {
+      continue;
+    }
+    if(!strcmp(procname, name)) {
+      return pid;
+    }
+  }
+
+  return -1;
+}
+
+
+/**
+ * Send a file descriptor to a process that listens on a UNIX domain socket
+ * with the given socket path.
+ **/
+static int
+elfldr_sendfd(const char *sockpath, int fd) {
+  struct sockaddr_un addr = {0};
+  struct msghdr msg = {0};
+  struct cmsghdr *cmsg;
+  uint8_t buf[24];
+  int sockfd;
+
+  addr.sun_family = AF_UNIX;
+  strcpy(addr.sun_path, sockpath);
+
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_name = &addr;
+  msg.msg_namelen = sizeof(struct sockaddr_un);
+  msg.msg_control = buf;
+  msg.msg_controllen = sizeof(buf);
+  
+  memset(buf, 0, sizeof(buf));
+  cmsg = (struct cmsghdr *)buf;
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type  = SCM_RIGHTS;
+  cmsg->cmsg_len   = 20;
+  *((int *)&buf[16]) = fd;
+
+  if((sockfd=socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+    return -1;
+  }
+
+  if(sendmsg(sockfd, &msg, 0) < 0) {
+    close(sockfd);
+    return -1;
+  }
+
+  return close(sockfd);
+}
+
+
+/**
+ * Pipe stdout of a process with the given pid to a file descriptor, where
+ * communication is done via a UNIX domain socket of the given socket path.
+ **/
+static int
+elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
+  struct sockaddr_un addr = {0};
+  intptr_t ptbuf;
+  int sockfd;
+
+  if((ptbuf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    return -1;
+  }
+
+  if((sockfd=pt_socket(pid, AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    return -1;
+  }
+
+  addr.sun_family = AF_UNIX;
+  strcpy(addr.sun_path, sockpath);
+  pt_copyin(pid, &addr, ptbuf, sizeof(addr));
+  if(pt_bind(pid, sockfd, ptbuf, sizeof(addr))) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if(elfldr_sendfd(sockpath, fd)) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  intptr_t hdr = ptbuf;
+  intptr_t iov = ptbuf + 0x100;
+  intptr_t control = ptbuf + 0x200;
+
+  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_name), 0);
+  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_namelen), 0);
+  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_iov), iov);
+  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_iovlen), 1);
+  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_control), control);
+  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_controllen), 24);
+  if(pt_recvmsg(pid, sockfd, hdr, 0) < 0) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if((fd=pt_getint(pid, control+16)) < 0) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if(pt_munmap(pid, ptbuf, PAGE_SIZE)) {
+    pt_close(pid, sockfd);
+  }
+
+  if(pt_close(pid, sockfd)) {
+    return -1;
+  }
+
+  if(pt_dup2(pid, fd, 1) < 0) {
+    return -1;
+  }
+
+  if(pt_dup2(pid, fd, 2) < 0) {
+    return -1;
+  }
+
+  return 0;
+}
+
+
+int
+elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
+  uint8_t priv_caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+			   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+  uint8_t prev_caps[16];
+  struct reg r;
+  pid_t pid;
+
+  if((pid=elfldr_find_pid(procname)) < 0) {
+    return -1;
+  }
+
+  if(kern_get_ucred_caps(pid, prev_caps)) {
+    return -1;
+  }
+  if(kern_set_ucred_caps(pid, priv_caps)) {
+    return -1;
+  }
+
+  if(pt_attach(pid)) {
+    kern_set_ucred_caps(pid, prev_caps);
+    return -1;
+  }
+
+  if(pt_getregs(pid, &r)) {
+    kern_set_ucred_caps(pid, prev_caps);
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(stdout > 0) {
+    unlink(ELFLDR_UNIX_SOCKET);
+    if(elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) {
+      kern_set_ucred_caps(pid, prev_caps);
+      pt_detach(pid);
+      return -1;
+    }
+    unlink(ELFLDR_UNIX_SOCKET);
+  }
+
+  r.r_rip = elfldr_load(pid, elf, size);
+  r.r_rdi = elfldr_args(pid);
+
+  kern_set_ucred_caps(pid, prev_caps);
+
+  if(!r.r_rip || !r.r_rdi) {
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(pt_setregs(pid, &r)) {
+    pt_detach(pid);
+    return -1;
+  }
+
+  return pt_detach(pid);
+}
+
+
+/**
+ * Read an ELF from a given socket connection.
+ **/
 static ssize_t
 elfldr_read(int connfd, uint8_t **data) {
   uint8_t buf[0x4000];
@@ -204,14 +511,15 @@ elfldr_read(int connfd, uint8_t **data) {
 }
 
 
+/**
+ * Accept ELFs from the given port, and execute them inside the process
+ * with the given name.
+ **/
 int
-elfldr_serve(const payload_args_t *args, uint16_t port) {
+elfldr_serve(const char* procname, uint16_t port) {
   struct sockaddr_in server_addr;
   struct sockaddr_in client_addr;
   socklen_t addr_len;
-
-  int stdout_fd;
-  int stderr_fd;
 
   uint8_t *elf;
   size_t size;
@@ -246,13 +554,7 @@ elfldr_serve(const payload_args_t *args, uint16_t port) {
     }
 
     if((size=elfldr_read(connfd, &elf))) {
-      stdout_fd = dup(1);
-      stderr_fd = dup(2);
-      dup2(connfd, 1);
-      dup2(connfd, 2);
-      elfldr_exec(args, elf, size);
-      dup2(stdout_fd, 1);
-      dup2(stderr_fd, 2);
+      elfldr_exec(procname, connfd, elf, size);
       free(elf);
     }
     close(connfd);
@@ -263,20 +565,24 @@ elfldr_serve(const payload_args_t *args, uint16_t port) {
 }
 
 
+/**
+ * Run the ELF server in a thread that restarts the server whenever
+ * an error occurs.
+ **/
 static void*
-elfldr_thread(void *args) {
+elfldr_thread(void *arg) {
   while(1) {
-    elfldr_serve((const payload_args_t *)args, 9021);
+    elfldr_serve((const char*)arg, ELFLDR_PORT);
     sleep(10);
   }
+
   return 0;
 }
 
 
 int
-elfldr_socksrv(const payload_args_t *args) {
+elfldr_socksrv(const char* procname) {
   pthread_t trd;
-
   signal(SIGCHLD, SIG_IGN);
-  return pthread_create(&trd, 0, elfldr_thread, (void*)args);
+  return pthread_create(&trd, 0, elfldr_thread, (void*)procname);
 }

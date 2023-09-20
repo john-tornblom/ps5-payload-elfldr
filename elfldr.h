@@ -16,7 +16,18 @@ along with this program; see the file COPYING. If not, see
 
 #pragma once
 
-#include "payload.h"
+#include "libc.h"
 
-int elfldr_socksrv(const payload_args_t *args);
+/**
+ * Execute an ELF inside the process with the given name, and pipe outout
+ * to the given stdout file descriptor.
+ **/
+int elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size);
+
+
+/**
+ * Launch a socket server that accapts ELF files that are executed in the
+ * process with given name, where stdout is piped to the connecting socket.
+ **/
+int elfldr_socksrv(const char* procname);
 

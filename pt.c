@@ -99,6 +99,12 @@ pt_copyin(pid_t pid, void* buf, intptr_t addr, size_t len) {
 
 
 int
+pt_setchar(pid_t pid, intptr_t addr, char val) {
+  return pt_copyin(pid, &val, addr, sizeof(val));
+}
+
+
+int
 pt_setlong(pid_t pid, intptr_t addr, long val) {
   return pt_copyin(pid, &val, addr, sizeof(val));
 }
@@ -263,9 +269,26 @@ pt_setsockopt(pid_t pid, int fd, int level, int optname, intptr_t optval,
 
 
 int
+pt_bind(pid_t pid, int sockfd, intptr_t addr, socklen_t addrlen) {
+  return (int)pt_syscall(pid, SYS_bind, sockfd, addr, addrlen, 0, 0, 0);
+}
+
+
+ssize_t
+pt_recvmsg(pid_t pid, int fd, intptr_t msg, int flags) {
+  return (int)pt_syscall(pid, SYS_recvmsg, fd, msg, flags, 0, 0, 0);
+}
+
+
+int
+pt_dup2(pid_t pid, int oldfd, int newfd) {
+  return (int)pt_syscall(pid, SYS_dup2, oldfd, newfd, 0, 0, 0, 0);
+}
+
+
+int
 pt_pipe(pid_t pid, intptr_t pipefd) {
   intptr_t faddr = dynlib_resolve(pid, 0x2001, "-Jp7F+pXxNg");
   return (int)pt_call(pid, faddr, pipefd, 0, 0, 0, 0, 0);
 }
-
 

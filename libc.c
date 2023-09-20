@@ -153,6 +153,11 @@ accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len) {
 }
 
 
+ssize_t sendmsg(int fd, const struct msghdr *msg, int flags) {
+  return (ssize_t)syscall(SYS_sendmsg, fd, msg, flags);
+}
+
+
 int
 close(int fd) {
   return (int)syscall(SYS_close, fd);
@@ -229,6 +234,12 @@ munmap(void* addr, size_t len) {
 int
 mprotect(void* addr, size_t len, int prot) {
   return (int)syscall(SYS_mprotect, addr, len, prot);
+}
+
+
+int
+unlink(const char *path) {
+  return (int)syscall(SYS_unlink, path);
 }
 
 

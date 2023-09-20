@@ -7,7 +7,7 @@ CFLAGS  := -target x86_64-pc-none -fPIE -fno-stack-protector -ffreestanding \
            -fno-builtin -nostdlib -nostdinc -Wall
 LDFLAGS := -pie -T elf_x86_64.x
 
-OBJS := crt.o libc.o kern.o dynlib.o pt.o bootstrap.o elfldr.o
+OBJS := crt.o libc.o kern.o dynlib.o pt.o elfldr.o
 
 all: elfldr.elf hello_world.elf
 
