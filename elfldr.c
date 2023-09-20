@@ -19,6 +19,7 @@ along with this program; see the file COPYING. If not, see
 #include "kern.h"
 #include "libc.h"
 #include "pt.h"
+#include "syscall.h"
 
 
 /**
@@ -565,24 +566,24 @@ elfldr_serve(const char* procname, uint16_t port) {
 }
 
 
-/**
- * Run the ELF server in a thread that restarts the server whenever
- * an error occurs.
- **/
-static void*
-elfldr_thread(void *arg) {
+int
+elfldr_socksrv(const char* procname) {
+  if(syscall(SYS_rfork, RFPROC | RFNOWAIT)) {
+    return 0;
+  }
+
+  syscall(SYS_setsid);                  // become session leader
+  syscall(0x1d0, -1, "elfldr.elf");     // set proc name
+  syscall(SYS_open, "/dev/null", 0);    // open stdin
+  syscall(SYS_open, "/dev/console", 1); // open stdout
+  syscall(SYS_open, "/dev/console", 1); // open stderr
+
   while(1) {
-    elfldr_serve((const char*)arg, ELFLDR_PORT);
+    elfldr_serve(procname, ELFLDR_PORT);
     sleep(10);
   }
 
+  syscall(SYS_exit, 0);
+
   return 0;
-}
-
-
-int
-elfldr_socksrv(const char* procname) {
-  pthread_t trd;
-  signal(SIGCHLD, SIG_IGN);
-  return pthread_create(&trd, 0, elfldr_thread, (void*)procname);
 }
