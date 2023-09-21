@@ -83,3 +83,5 @@ int pt_close(pid_t pid, int fd);
 
 int pt_dup2(pid_t pid, int oldfd, int newfd);
 int pt_pipe(pid_t pid, intptr_t pipefd);
+
+void pt_perror(pid_t pid, const char *s);

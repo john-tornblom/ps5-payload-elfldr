@@ -20,20 +20,20 @@ along with this program; see the file COPYING. If not, see
 #include "syscall.h"
 
 
-static int*  (*sce_errno)(void);
+static int   (*sce_htons)(uint16_t);
+static int   (*sce_sleep)(int);
 static void* (*sce_malloc)(size_t);
 static void* (*sce_realloc)(void*, size_t);
 static void  (*sce_free)(void*);
-static void* (*sce_memcpy)(void*, const void*, size_t);
 static void* (*sce_memset)(void*, int, size_t);
+static void* (*sce_memcpy)(void*, const void*, size_t);
 static char* (*sce_strcpy)(const char*, const char*);
 static int   (*sce_strcmp)(const char*, const char*);
 static int   (*sce_strncmp)(const char*, const char*, size_t);
-static int   (*sce_htons)(uint16_t);
-static int   (*sce_sleep)(int);
-static void* (*sce_signal)(int, void*);
-static int   (*sce_pthread_create)(pthread_t*, const pthread_attr_t*,
-				   void *(*func) (void *), void *);
+static int   (*sce_strcat)(char*, const char*);
+static void  (*sce_puts)(const char*);
+static void  (*sce_perror)(const char*);
+static char* (*sce_strerror)(int);
 
 static intptr_t sce_syscall;
 asm(".intel_syntax noprefix\n"
@@ -56,19 +56,10 @@ int
 libc_init(const payload_args_t *args) {
   int error;
 
-  if((error=args->sceKernelDlsym(0x2001, "__error", &sce_errno))) {
-    return error;
-  }
   if((error=args->sceKernelDlsym(0x2001, "htons", &sce_htons))) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "sleep", &sce_sleep))) {
-    return error;
-  }
-  if((error=args->sceKernelDlsym(0x2001, "pthread_create", &sce_pthread_create))) {
-    return error;
-  }
-  if((error=args->sceKernelDlsym(0x2001, "signal", &sce_signal))) {
     return error;
   }
   if((error=args->sceKernelDlsym(0x2001, "getpid", &sce_syscall))) {
@@ -100,14 +91,31 @@ libc_init(const payload_args_t *args) {
   if((error=args->sceKernelDlsym(0x2, "strncmp", &sce_strncmp))) {
     return error;
   }
-
+  if((error=args->sceKernelDlsym(0x2, "strcat", &sce_strcat))) {
+    return error;
+  }
+  if((error=args->sceKernelDlsym(0x2, "puts", &sce_puts))) {
+    return error;
+  }
+  if((error=args->sceKernelDlsym(0x2, "perror", &sce_perror))) {
+    return error;
+  }
+  if((error=args->sceKernelDlsym(0x2, "strerror", &sce_strerror))) {
+    return error;
+  }
   return 0;
 }
 
 
 int
-geterrno(void) {
-  return *sce_errno();
+open(const char *path, int flags) {
+  return (int)syscall(SYS_open, path, flags);
+}
+
+
+int
+unlink(const char *path) {
+  return (int)syscall(SYS_unlink, path);
 }
 
 
@@ -120,6 +128,18 @@ read(int fd, void *buf, size_t cnt) {
 ssize_t
 write(int fd, const void *buf, size_t cnt) {
   return syscall(SYS_write, fd, buf, cnt);
+}
+
+
+int
+dup2(int oldfd, int newfd) {
+  return (int)syscall(SYS_dup2, oldfd, newfd);
+}
+
+
+int
+close(int fd) {
+  return (int)syscall(SYS_close, fd);
 }
 
 
@@ -158,33 +178,9 @@ ssize_t sendmsg(int fd, const struct msghdr *msg, int flags) {
 }
 
 
-int
-close(int fd) {
-  return (int)syscall(SYS_close, fd);
-}
-
-
-int
-dup(int oldfd) {
-  return (int)syscall(SYS_dup, oldfd);
-}
-
-
-int
-dup2(int oldfd, int newfd) {
-  return (int)syscall(SYS_dup2, oldfd, newfd);
-}
-
-
 pid_t
 getpid(void) {
   return (pid_t)syscall(SYS_getpid);
-}
-
-
-pid_t
-getppid(void) {
-  return (pid_t)syscall(SYS_getppid);
 }
 
 
@@ -237,15 +233,15 @@ mprotect(void* addr, size_t len, int prot) {
 }
 
 
-int
-unlink(const char *path) {
-  return (int)syscall(SYS_unlink, path);
+void*
+malloc(size_t len) {
+  return sce_malloc(len);
 }
 
 
 void*
-malloc(size_t len) {
-  return sce_malloc(len);
+realloc(void *ptr, size_t len) {
+  return sce_realloc(ptr, len);
 }
 
 
@@ -256,20 +252,14 @@ free(void *ptr) {
 
 
 void*
-memcpy(void *dst, const void* src, size_t len) {
-  return sce_memcpy(dst, src, len);
-}
-
-
-void*
 memset(void *dst, int c, size_t len) {
   return sce_memset(dst, c, len);
 }
 
 
 void*
-realloc(void *ptr, size_t len) {
-  return sce_realloc(ptr, len);
+memcpy(void *dst, const void* src, size_t len) {
+  return sce_memcpy(dst, src, len);
 }
 
 
@@ -291,6 +281,12 @@ strncmp(const char *s1, const char *s2, size_t len) {
 }
 
 
+int
+strcat(char* s1, const char* s2) {
+  return sce_strcat(s1, s2);
+}
+
+
 uint16_t
 htons(uint16_t val) {
   return sce_htons(val);
@@ -303,15 +299,19 @@ sleep(uint32_t seconds) {
 }
 
 
-int
-pthread_create(pthread_t *trd, const pthread_attr_t *attr,
-	       void *(*func) (void *), void *arg) {
-  return sce_pthread_create(trd, attr, func, arg);
+void puts(const char *s) {
+  sce_puts(s);
 }
 
 
-void*
-signal(int num, void* handler) {
-  return sce_signal(num, handler);
+void
+perror(const char* s) {
+  sce_perror(s);
+}
+
+
+char*
+strerror(int error) {
+  return sce_strerror(error);
 }
 

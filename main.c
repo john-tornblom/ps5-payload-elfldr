@@ -18,8 +18,13 @@ along with this program; see the file COPYING. If not, see
 #include "kern.h"
 #include "libc.h"
 
+
 #ifdef ELFLDR_BOOTSTRAP
 #include "elfldr-socksrv_elf.c"
+#endif
+
+#ifndef ELFLDR_PORT
+#define ELFLDR_PORT 9021
 #endif
 
 
@@ -48,7 +53,7 @@ main() {
   return elfldr_exec("ScePartyDaemon", -1, elfldr_socksrv_elf,
 		     elfldr_socksrv_elf_len);
 #else
-  return elfldr_socksrv("SceRedisServer");
+  return elfldr_socksrv("SceRedisServer", ELFLDR_PORT);
 #endif
 }
 

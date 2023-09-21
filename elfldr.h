@@ -29,5 +29,5 @@ int elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size);
  * Launch a socket server that accapts ELF files that are executed in the
  * process with given name, where stdout is piped to the connecting socket.
  **/
-int elfldr_socksrv(const char* procname);
+int elfldr_socksrv(const char* procname, uint16_t port);
 

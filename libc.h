@@ -46,14 +46,10 @@ along with this program; see the file COPYING. If not, see
 #define MAP_FIXED     0x10
 #define MAP_ANONYMOUS 0x1000
 
-#define SIGCHLD 20
-#define SIG_IGN (void*)1
-
+#define RFFDG    (1<<2)
 #define RFPROC   (1<<4)
 #define RFNOWAIT (1<<6)
 #define RFCFDG   (1<<12)
-
-#define errno (geterrno())
 
 
 typedef char  int8_t;
@@ -75,12 +71,6 @@ typedef uint32_t in_addr_t;
 typedef int32_t  pid_t;
 typedef int32_t  uid_t;
 typedef int32_t  gid_t;
-
-struct pthread;
-struct pthread_attr;
-
-typedef struct pthread      *pthread_t;
-typedef struct pthread_attr *pthread_attr_t;
 
 struct in_addr {
   in_addr_t s_addr;
@@ -118,27 +108,38 @@ struct cmsghdr {
 
 
 long syscall(int, ...);
-int geterrno(void);
 
+int open(const char *path, int flags);
+int unlink(const char *pathname);
 ssize_t read(int fd, void *buf, size_t cnt);
 ssize_t write(int fd, const void* buf, size_t cnt);
+int dup2(int oldfd, int newfd);
 int close(int fd);
 
 int socket(int dom, int ty, int proto);
 int setsockopt(int fd, int lvl, int name, const void *val,
 	       unsigned int len);
-
-int listen(int fd, int backlog);
 int bind(int fd, const struct sockaddr_in *addr, socklen_t addr_len);
+int listen(int fd, int backlog);
 int accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len);
 ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
 
 pid_t getpid(void);
 pid_t waitpid(pid_t pid, int *status, int opts);
-int dup(int oldfd);
-int dup2(int oldfd, int newfd);
 
 int ptrace(int request, pid_t pid, intptr_t addr, int data);
+int sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,
+	   const void *newp, size_t newlen);
+
+int jitshm_create(const char* name, size_t size, int flags);
+int jitshm_alias(int fd, int flags);
+
+void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off);
+int munmap(void* addr, size_t len);
+int mprotect(void* addr, size_t len, int prot);
+
+uint16_t htons(uint16_t val);
+uint32_t sleep(uint32_t seconds);
 
 void* malloc(size_t len);
 void* realloc(void *ptr, size_t len);
@@ -149,22 +150,8 @@ void* memcpy(void *dst, const void* src, size_t len);
 char* strcpy(char *dst, const char *src);
 int strcmp(const char* s1, const char* s2);
 int strncmp(const char *s1, const char *s2, size_t n);
+int strcat(char* s1, const char* s2);
 
-uint16_t htons(uint16_t val);
-uint32_t sleep(uint32_t seconds);
-
-int sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,
-	   const void *newp, size_t newlen);
-
-int pthread_create(pthread_t *trd, const pthread_attr_t *attr,
-		   void *(*func) (void *), void *arg);
-
-int jitshm_create(const char* name, size_t size, int flags);
-int jitshm_alias(int fd, int flags);
-
-void* mmap(void* addr, size_t len, int prot, int flags, int fd, off_t off);
-int   munmap(void* addr, size_t len);
-int   mprotect(void* addr, size_t len, int prot);
-
-int unlink(const char *pathname);
-void* signal(int num, void* handler);
+void puts(const char *s);
+void perror(const char *s);
+char *strerror(int error);

@@ -292,3 +292,16 @@ pt_pipe(pid_t pid, intptr_t pipefd) {
   return (int)pt_call(pid, faddr, pipefd, 0, 0, 0, 0, 0);
 }
 
+
+void
+pt_perror(pid_t pid, const char *s) {
+  intptr_t faddr = dynlib_resolve(pid, 0x2001, "9BcDykPmo1I"); //__error
+  intptr_t addr = pt_call(pid, faddr, 0, 0, 0, 0, 0, 0);
+  int err = pt_getint(pid, addr);
+  char buf[255];
+
+  strcpy(buf, s);
+  strcat(buf, ": ");
+  strcat(buf, strerror(err));
+  puts(buf);
+}
