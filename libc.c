@@ -184,6 +184,18 @@ getpid(void) {
 }
 
 
+int
+kill(pid_t pid, int sig) {
+  return (int)syscall(SYS_kill, pid, sig);
+}
+
+
+pid_t
+rfork(int flags) {
+  return (pid_t)syscall(SYS_rfork, flags);
+}
+
+
 pid_t
 waitpid(pid_t pid, int *status, int opts) {
   return (pid_t)syscall(SYS_wait4, pid, status, opts, 0);

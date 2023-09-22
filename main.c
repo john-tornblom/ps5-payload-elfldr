@@ -31,24 +31,29 @@ along with this program; see the file COPYING. If not, see
 int
 main() {
   uint8_t caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-		      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+                      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   uint8_t qa_flags[16];
+  pid_t pid = getpid();
 
-  // enable debugging
   if(kern_get_qa_flags(qa_flags)) {
+    puts("[elfldr.elf] kern_get_qa_flags() failed");
     return -1;
   }
   qa_flags[1] |= 0x03;
   if(kern_set_qa_flags(qa_flags)) {
+    puts("[elfldr.elf] kern_set_qa_flags() failed");
     return -1;
   }
-  if(kern_set_ucred_auth_id(getpid(), 0x4800000000010003l)) {
+
+  if(kern_set_ucred_auth_id(pid, 0x4800000000010003l)) {
+    puts("[elfldr.elf] kern_set_ucred_auth_id() failed");
     return -1;
   }
-  if(kern_get_ucred_caps(getpid(), caps)) {
+  if(kern_set_ucred_caps(pid, caps)) {
+    puts("[elfldr.elf] kern_set_ucred_caps() failed");
     return -1;
   }
-  
+
 #ifdef ELFLDR_BOOTSTRAP
   return elfldr_exec("ScePartyDaemon", -1, elfldr_socksrv_elf,
 		     elfldr_socksrv_elf_len);

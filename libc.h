@@ -51,6 +51,8 @@ along with this program; see the file COPYING. If not, see
 #define RFNOWAIT (1<<6)
 #define RFCFDG   (1<<12)
 
+#define SIGKILL 9
+
 
 typedef char  int8_t;
 typedef short int16_t;
@@ -124,8 +126,10 @@ int listen(int fd, int backlog);
 int accept(int fd, struct sockaddr_in *addr, socklen_t *addr_len);
 ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
 
+pid_t rfork(int flags);
 pid_t getpid(void);
 pid_t waitpid(pid_t pid, int *status, int opts);
+int kill(pid_t pid, int sig);
 
 int ptrace(int request, pid_t pid, intptr_t addr, int data);
 int sysctl(const int *name, size_t namelen, void *oldp, size_t *oldlenp,

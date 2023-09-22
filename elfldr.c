@@ -466,6 +466,8 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
   uint8_t priv_caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
 			   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   uint8_t prev_caps[16];
+  intptr_t addr;
+  intptr_t args;
   struct reg r;
   pid_t pid;
 
@@ -501,28 +503,44 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
     unlink(ELFLDR_UNIX_SOCKET);
     if(elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) {
       kern_set_ucred_caps(pid, prev_caps);
+      pt_setregs(pid, &r);
       pt_detach(pid);
       return -1;
     }
     unlink(ELFLDR_UNIX_SOCKET);
   }
 
-  r.r_rip = elfldr_load(pid, elf, size);
-  r.r_rdi = elfldr_args(pid);
-
-  kern_set_ucred_caps(pid, prev_caps);
-  if(!r.r_rip || !r.r_rdi) {
+  if(!(addr=elfldr_load(pid, elf, size))) {
+    puts("[elfldr.elf] elfldr_load() failed");
+    kern_set_ucred_caps(pid, prev_caps);
+    pt_setregs(pid, &r);
     pt_detach(pid);
-    return -1;
   }
 
+  if(!(args=elfldr_args(pid))) {
+    puts("[elfldr.elf] elfldr_args() failed");
+    kern_set_ucred_caps(pid, prev_caps);
+    pt_setregs(pid, &r);
+    pt_detach(pid);
+  }
+
+  kern_set_ucred_caps(pid, prev_caps);
+
+  r.r_rip = addr;
+  r.r_rdi = args;
   if(pt_setregs(pid, &r)) {
     perror("[elfldr.elf] pt_setregs");
     pt_detach(pid);
     return -1;
   }
 
-  return pt_detach(pid);
+  puts("[elfldr.elf] running ELF...");
+  if(pt_detach(pid)) {
+    perror("[elfldr.elf] pt_detach");
+    return -1;
+  }
+
+  return 0;
 }
 
 
@@ -567,6 +585,9 @@ elfldr_serve(const char* procname, uint16_t port) {
   int connfd;
   int srvfd;
 
+  //
+  // launch socket server
+  //
   if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     perror("[eldldr.elf] socket");
     return -1;
@@ -603,6 +624,7 @@ elfldr_serve(const char* procname, uint16_t port) {
       return -1;
     }
 
+    // We got a connection, read ELF and launch it in the given process.
     if((size=elfldr_read(connfd, &elf))) {
       elfldr_exec(procname, connfd, elf, size);
       free(elf);
@@ -619,16 +641,25 @@ int
 elfldr_socksrv(const char* procname, uint16_t port) {
   pid_t pid;
 
+  // kill previous instances of elfldr.elf
   while((pid=elfldr_find_pid("elfldr.elf")) > 0) {
-    if(syscall(SYS_kill, pid, 9)) { //send SIGKILL
+    if(kill(pid, SIGKILL)) {
       perror("[eldldr.elf] kill");
     }
+    sleep(1);
   }
 
-  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
+  // fork process
+  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG)) < 0) {
+    perror("[eldldr.elf] rfork");
+    return -1;
+  }
+  // parent process should just return
+  if(pid) {
     return pid;
   }
 
+  // initialize child process
   syscall(SYS_setsid);              // become session leader
   syscall(0x1d0, -1, "elfldr.elf"); // set proc name
   dup2(open("/dev/console", 1), 1); // set stdout to /dev/klog
@@ -640,5 +671,6 @@ elfldr_socksrv(const char* procname, uint16_t port) {
     sleep(10);
   }
 
+  // unreacheable
   return syscall(SYS_exit, 0);
 }
