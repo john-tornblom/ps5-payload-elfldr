@@ -644,14 +644,14 @@ elfldr_socksrv(const char* procname, uint16_t port) {
   // kill previous instances of elfldr.elf
   while((pid=elfldr_find_pid("elfldr.elf")) > 0) {
     if(kill(pid, SIGKILL)) {
-      perror("[eldldr.elf] kill");
+      perror("[elfldr.elf] kill");
     }
     sleep(1);
   }
 
   // fork process
   if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG)) < 0) {
-    perror("[eldldr.elf] rfork");
+    perror("[elfldr.elf] rfork");
     return -1;
   }
   // parent process should just return
