@@ -302,17 +302,17 @@ elfldr_find_pid(const char* name) {
   uint8_t *buf;
 
   if(sysctl(mib, 4, 0, &buf_size, 0, 0)) {
-    perror("[eldldr.elf] sysctl");
+    perror("[elfldr.elf] sysctl");
     return -1;
   }
 
   if(!(buf=malloc(buf_size))) {
-    perror("[eldldr.elf] malloc");
+    perror("[elfldr.elf] malloc");
     return -1;
   }
 
   if(sysctl(mib, 4, buf, &buf_size, 0, 0)) {
-    perror("[eldldr.elf] sysctl");
+    perror("[elfldr.elf] sysctl");
     return -1;
   }
 
@@ -362,12 +362,12 @@ elfldr_sendfd(const char *sockpath, int fd) {
   *((int *)&buf[16]) = fd;
 
   if((sockfd=socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-    perror("[eldldr.elf] socket");
+    perror("[elfldr.elf] socket");
     return -1;
   }
 
   if(sendmsg(sockfd, &msg, 0) < 0) {
-    perror("[eldldr.elf] sendmsg");
+    perror("[elfldr.elf] sendmsg");
     close(sockfd);
     return -1;
   }
@@ -589,12 +589,12 @@ elfldr_serve(const char* procname, uint16_t port) {
   // launch socket server
   //
   if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    perror("[eldldr.elf] socket");
+    perror("[elfldr.elf] socket");
     return -1;
   }
 
   if(setsockopt(srvfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
-    perror("[eldldr.elf] setsockopt");
+    perror("[elfldr.elf] setsockopt");
     close(srvfd);
     return -1;
   }
@@ -604,13 +604,13 @@ elfldr_serve(const char* procname, uint16_t port) {
   server_addr.sin_port = htons(port);
 
   if(bind(srvfd, &server_addr, sizeof(server_addr)) != 0) {
-    perror("[eldldr.elf] bind");
+    perror("[elfldr.elf] bind");
     close(srvfd);
     return -1;
   }
 
   if(listen(srvfd, 5) != 0) {
-    perror("[eldldr.elf] listen");
+    perror("[elfldr.elf] listen");
     close(srvfd);
     return -1;
   }
@@ -618,7 +618,7 @@ elfldr_serve(const char* procname, uint16_t port) {
   addr_len = sizeof(client_addr);
   while(1) {
     if((connfd=accept(srvfd, &client_addr, &addr_len)) < 0) {
-      perror("[eldldr.elf] accept");
+      perror("[elfldr.elf] accept");
       close(connfd);
       close(srvfd);
       return -1;

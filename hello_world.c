@@ -25,6 +25,6 @@ _start(const payload_args_t *args) {
     return;
   }
 
-  puts("Hello, world!");
+  puts("[hello_world.elf] Hello, world!");
 }
 
