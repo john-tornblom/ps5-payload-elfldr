@@ -463,9 +463,6 @@ elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
 
 int
 elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
-  uint8_t priv_caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-			   0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-  uint8_t prev_caps[16];
   intptr_t addr;
   intptr_t args;
   struct reg r;
@@ -476,25 +473,13 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
     return -1;
   }
 
-  if(kern_get_ucred_caps(pid, prev_caps)) {
-    puts("[elfldr.elf] kern_get_ucred_caps() failed");
-    return -1;
-  }
-
-  if(kern_set_ucred_caps(pid, priv_caps)) {
-    puts("[elfldr.elf] kern_set_ucred_caps() failed");
-    return -1;
-  }
-
   if(pt_attach(pid)) {
     perror("[elfldr.elf] pt_attach");
-    kern_set_ucred_caps(pid, prev_caps);
     return -1;
   }
 
   if(pt_getregs(pid, &r)) {
     perror("[elfldr.elf] pt_getregs");
-    kern_set_ucred_caps(pid, prev_caps);
     pt_detach(pid);
     return -1;
   }
@@ -502,8 +487,7 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
   if(stdout > 0) {
     unlink(ELFLDR_UNIX_SOCKET);
     if(elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) {
-      kern_set_ucred_caps(pid, prev_caps);
-      pt_setregs(pid, &r);
+      puts("[elfldr.elf] elfldr_stdout() failed");
       pt_detach(pid);
       return -1;
     }
@@ -512,19 +496,15 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
 
   if(!(addr=elfldr_load(pid, elf, size))) {
     puts("[elfldr.elf] elfldr_load() failed");
-    kern_set_ucred_caps(pid, prev_caps);
-    pt_setregs(pid, &r);
     pt_detach(pid);
+    return -1;
   }
 
   if(!(args=elfldr_args(pid))) {
     puts("[elfldr.elf] elfldr_args() failed");
-    kern_set_ucred_caps(pid, prev_caps);
-    pt_setregs(pid, &r);
     pt_detach(pid);
+    return -1;
   }
-
-  kern_set_ucred_caps(pid, prev_caps);
 
   r.r_rip = addr;
   r.r_rdi = args;

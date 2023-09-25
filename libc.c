@@ -14,7 +14,7 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
-
+#include "kern.h"
 #include "libc.h"
 #include "payload.h"
 #include "syscall.h"
@@ -204,7 +204,40 @@ waitpid(pid_t pid, int *status, int opts) {
 
 int
 ptrace(int request, pid_t pid, intptr_t addr, int data) {
-  return (int)syscall(SYS_ptrace, request, pid, addr, data);
+  uint8_t priv_caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+                           0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+  uint8_t prev_caps[16];
+  pid_t mypid = getpid();
+  uint64_t authid;
+  int ret;
+
+  if(kern_get_ucred_auth_id(mypid, &authid)) {
+    return -1;
+  }
+
+  if(kern_get_ucred_caps(pid, prev_caps)) {
+    return -1;
+  }
+
+  if(kern_set_ucred_auth_id(mypid, 0x4800000000010003l)) {
+    return -1;
+  }
+
+  if(kern_set_ucred_caps(pid, priv_caps)) {
+    return -1;
+  }
+
+  ret = (int)syscall(SYS_ptrace, request, pid, addr, data);
+
+  if(kern_set_ucred_caps(pid, prev_caps)) {
+    return -1;
+  }
+
+  if(kern_set_ucred_auth_id(mypid, authid)) {
+    return -1;
+  }
+
+  return ret;
 }
 
 
