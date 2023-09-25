@@ -23,10 +23,6 @@ along with this program; see the file COPYING. If not, see
 #include "elfldr-socksrv_elf.c"
 #endif
 
-#ifndef ELFLDR_PORT
-#define ELFLDR_PORT 9021
-#endif
-
 
 int
 main() {
