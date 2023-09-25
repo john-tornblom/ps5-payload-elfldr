@@ -18,11 +18,11 @@ along with this program; see the file COPYING. If not, see
 #include "pt.h"
 #include "syscall.h"
 
-#define	PT_READ_D  2
-#define	PT_WRITE_D 5
-#define	PT_STEP	   9
-#define	PT_ATTACH  10
-#define	PT_DETACH  11
+#define PT_READ_D  2
+#define PT_WRITE_D 5
+#define PT_STEP    9
+#define PT_ATTACH  10
+#define PT_DETACH  11
 #define PT_IO      12
 #define PT_GETREGS 33
 #define PT_SETREGS 34
