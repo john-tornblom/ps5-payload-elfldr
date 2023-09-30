@@ -120,6 +120,11 @@ static int
 kern_write(intptr_t addr, unsigned long *data) {
   intptr_t victim_buf[3];
 
+  // sanity check for invalid kernel pointers
+  if(!(addr & 0xffff000000000000)) {
+    return -1;
+  }
+
   victim_buf[0] = addr;
   victim_buf[1] = 0;
   victim_buf[2] = 0;
