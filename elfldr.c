@@ -38,6 +38,9 @@ along with this program; see the file COPYING. If not, see
 		     (((x) & PF_X) ? PROT_EXEC  : 0))
 
 
+#include "payload_launchpad_elf.c"
+
+
 /**
  * Load an ELF into the address space of a process with the given pid.
  **/
@@ -212,7 +215,7 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
  * Create payload args in the address space of the process with the given pid.
  **/
 intptr_t
-elfldr_args(pid_t pid) {
+elfldr_payload_args(pid_t pid) {
   int victim_sock;
   int master_sock;
   intptr_t buf;
@@ -440,24 +443,16 @@ elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
   if(pt_munmap(pid, ptbuf, PAGE_SIZE)) {
     pt_perror(pid, "[elfldr.elf] pt_munmap");
     pt_close(pid, sockfd);
+    pt_close(pid, fd);
   }
 
   if(pt_close(pid, sockfd)) {
     pt_perror(pid, "[elfldr.elf] pt_close");
+    pt_close(pid, fd);
     return -1;
   }
 
-  if(pt_dup2(pid, fd, 1) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_dup2");
-    return -1;
-  }
-
-  if(pt_dup2(pid, fd, 2) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_dup2");
-    return -1;
-  }
-
-  return 0;
+  return fd;
 }
 
 
@@ -466,9 +461,11 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
   uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
                           0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   uint8_t caps[16];
-  intptr_t addr;
-  intptr_t args;
-  struct reg r;
+  intptr_t payload_entry;
+  intptr_t payload_args;
+  intptr_t launch_entry;
+  struct reg jmp_reg;
+  struct reg bak_reg;
   pid_t pid;
 
   if((pid=elfldr_find_pid(procname)) < 0) {
@@ -493,16 +490,17 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
     return -1;
   }
 
-  if(pt_getregs(pid, &r)) {
+  if(pt_getregs(pid, &bak_reg)) {
     perror("[elfldr.elf] pt_getregs");
     kern_set_ucred_caps(pid, caps);
     pt_detach(pid);
     return -1;
   }
+  memcpy(&jmp_reg, &bak_reg, sizeof(jmp_reg));
 
   if(stdout > 0) {
     unlink(ELFLDR_UNIX_SOCKET);
-    if(elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) {
+    if((stdout=elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) < 0) {
       puts("[elfldr.elf] elfldr_stdout() failed");
       kern_set_ucred_caps(pid, caps);
       pt_detach(pid);
@@ -511,23 +509,53 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
     unlink(ELFLDR_UNIX_SOCKET);
   }
 
-  if(!(addr=elfldr_load(pid, elf, size))) {
+  if(!(payload_entry=elfldr_load(pid, elf, size))) {
     puts("[elfldr.elf] elfldr_load() failed");
     kern_set_ucred_caps(pid, caps);
     pt_detach(pid);
     return -1;
   }
 
-  if(!(args=elfldr_args(pid))) {
+  if(!(payload_args=elfldr_payload_args(pid))) {
     puts("[elfldr.elf] elfldr_args() failed");
     kern_set_ucred_caps(pid, caps);
     pt_detach(pid);
     return -1;
   }
 
-  r.r_rip = addr;
-  r.r_rdi = args;
-  if(pt_setregs(pid, &r)) {
+  if(!(launch_entry=elfldr_load(pid, payload_launchpad_elf,
+				payload_launchpad_elf_len))) {
+    puts("[elfldr.elf] elfldr_load() failed");
+    kern_set_ucred_caps(pid, caps);
+    pt_detach(pid);
+    return -1;
+  }
+
+  jmp_reg.r_rip = launch_entry;
+  jmp_reg.r_rsp -= 8;
+  jmp_reg.r_rdi = payload_entry;
+  jmp_reg.r_rsi = payload_args;
+  jmp_reg.r_rdx = stdout;
+  if(pt_setregs(pid, &jmp_reg)) {
+    perror("[elfldr.elf] pt_setregs");
+    kern_set_ucred_caps(pid, caps);
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(pt_continue(pid)) {
+    perror("[elfldr.elf] pt_continue");
+    kern_set_ucred_caps(pid, caps);
+    pt_detach(pid);
+    return -1;
+  }
+  if(waitpid(pid, 0, 0) == -1) {
+    perror("[elfldr.elf] waitpid");
+    kern_set_ucred_caps(pid, caps);
+    pt_detach(pid);
+  }
+
+  if(pt_setregs(pid, &bak_reg)) {
     perror("[elfldr.elf] pt_setregs");
     kern_set_ucred_caps(pid, caps);
     pt_detach(pid);
@@ -535,7 +563,6 @@ elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
   }
 
   puts("[elfldr.elf] running ELF...");
-
   kern_set_ucred_caps(pid, caps);
   if(pt_detach(pid)) {
     perror("[elfldr.elf] pt_detach");

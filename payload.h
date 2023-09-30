@@ -26,3 +26,5 @@ typedef struct payload_args {
   int  *payloadout;
 } payload_args_t;
 
+typedef void (payload_entry_t)(const payload_args_t *args);
+
