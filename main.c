@@ -39,9 +39,11 @@ main() {
   }
 
 #ifdef ELFLDR_BOOTSTRAP
+  puts("[elfldr.elf] Bootstrapping");
   return elfldr_exec("ScePartyDaemon", -1, elfldr_socksrv_elf,
 		     elfldr_socksrv_elf_len);
 #else
+  puts("[elfldr.elf] Launching socket server");
   return elfldr_socksrv("SceRedisServer", ELFLDR_PORT);
 #endif
 }
