@@ -94,7 +94,14 @@ pt_copyin(pid_t pid, void* buf, intptr_t addr, size_t len) {
     .piod_offs = (void*)addr,
     .piod_addr = buf,
     .piod_len = len};
-  return ptrace(PT_IO, pid, (intptr_t)&iod, 0);  
+
+  while(ptrace(PT_IO, pid, (intptr_t)&iod, 0)) {
+    if(errno != EAGAIN) {
+      return -1;
+    }
+  }
+
+  return 0;
 }
 
 

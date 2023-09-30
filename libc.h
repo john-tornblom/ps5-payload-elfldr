@@ -53,6 +53,9 @@ along with this program; see the file COPYING. If not, see
 
 #define SIGKILL 9
 
+#define EAGAIN 35
+
+#define errno (*geterrno())
 
 typedef char  int8_t;
 typedef short int16_t;
@@ -159,3 +162,5 @@ int strcat(char* s1, const char* s2);
 void puts(const char *s);
 void perror(const char *s);
 char *strerror(int error);
+int* geterrno(void);
+

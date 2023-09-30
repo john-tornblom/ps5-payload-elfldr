@@ -34,6 +34,7 @@ static int   (*sce_strcat)(char*, const char*);
 static void  (*sce_puts)(const char*);
 static void  (*sce_perror)(const char*);
 static char* (*sce_strerror)(int);
+static int*  (*sce_errno)(void);
 
 static intptr_t sce_syscall;
 asm(".intel_syntax noprefix\n"
@@ -367,3 +368,7 @@ strerror(int error) {
   return sce_strerror(error);
 }
 
+
+int* geterrno(void) {
+  return sce_errno();
+}
