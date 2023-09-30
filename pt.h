@@ -52,6 +52,7 @@ struct reg {
 
 int pt_attach(pid_t pid);
 int pt_detach(pid_t pid);
+int pt_continue(pid_t pid);
 
 int pt_getregs(pid_t pid, struct reg *r);
 int pt_setregs(pid_t pid, const struct reg *r);

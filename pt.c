@@ -18,14 +18,15 @@ along with this program; see the file COPYING. If not, see
 #include "pt.h"
 #include "syscall.h"
 
-#define PT_READ_D  2
-#define PT_WRITE_D 5
-#define PT_STEP    9
-#define PT_ATTACH  10
-#define PT_DETACH  11
-#define PT_IO      12
-#define PT_GETREGS 33
-#define PT_SETREGS 34
+#define PT_READ_D   2
+#define PT_WRITE_D  5
+#define PT_CONTINUE 7
+#define PT_STEP     9
+#define PT_ATTACH   10
+#define PT_DETACH   11
+#define PT_IO       12
+#define PT_GETREGS  33
+#define PT_SETREGS  34
 
 #define PIOD_READ_D  1
 #define PIOD_WRITE_D 2
@@ -56,6 +57,16 @@ pt_attach(pid_t pid) {
 int
 pt_detach(pid_t pid) {
   if(ptrace(PT_DETACH, pid, 0, 0) == -1) {
+    return -1;
+  }
+
+  return 0;
+}
+
+
+int
+pt_continue(pid_t pid) {
+  if(ptrace(PT_CONTINUE, pid, 1, SIGCONT) == -1) {
     return -1;
   }
 
