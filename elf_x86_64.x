@@ -30,4 +30,5 @@ SECTIONS {
 	.rodata : { *(.rodata .rodata.*) } : ph_rodata
 	. = ALIGN(0x4000);
 	.data : { *(.data .data.*) } : ph_data
+	.bss : { *(.bss .bss.*) *(COMMON) }
 }
