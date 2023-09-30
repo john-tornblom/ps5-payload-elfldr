@@ -52,6 +52,7 @@ along with this program; see the file COPYING. If not, see
 #define RFCFDG   (1<<12)
 
 #define SIGKILL 9
+#define SIGCONT 19
 
 #define EAGAIN 35
 
