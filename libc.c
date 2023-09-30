@@ -208,7 +208,6 @@ ptrace(int request, pid_t pid, intptr_t addr, int data) {
   uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
                           0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   pid_t mypid = getpid();
-  uint8_t mycaps[16];
   uint8_t caps[16];
   uint64_t authid;
   int ret;
@@ -216,10 +215,7 @@ ptrace(int request, pid_t pid, intptr_t addr, int data) {
   if(kern_get_ucred_auth_id(mypid, &authid)) {
     return -1;
   }
-  if(kern_get_ucred_caps(mypid, mycaps)) {
-    return -1;
-  }
-  if(kern_get_ucred_caps(pid, caps)) {
+  if(kern_get_ucred_caps(mypid, caps)) {
     return -1;
   }
 
@@ -229,19 +225,13 @@ ptrace(int request, pid_t pid, intptr_t addr, int data) {
   if(kern_set_ucred_caps(mypid, privcaps)) {
     return -1;
   }
-  if(kern_set_ucred_caps(pid, privcaps)) {
-    return -1;
-  }
 
   ret = (int)syscall(SYS_ptrace, request, pid, addr, data);
 
   if(kern_set_ucred_auth_id(mypid, authid)) {
     return -1;
   }
-  if(kern_set_ucred_caps(mypid, mycaps)) {
-    return -1;
-  }
-  if(kern_set_ucred_caps(pid, caps)) {
+  if(kern_set_ucred_caps(mypid, caps)) {
     return -1;
   }
 
