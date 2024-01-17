@@ -109,7 +109,7 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
     int alias_fd = -1;
     int shm_fd = -1;
 
-    if(phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0) {
+    if(phdr[i].p_memsz == 0) {
       continue;
     }
 
