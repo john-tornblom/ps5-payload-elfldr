@@ -20,11 +20,27 @@ along with this program; see the file COPYING. If not, see
 #define ET_EXEC           2
 #define ET_DYN            3
 #define PT_LOAD           1
+#define PT_DYNAMIC        2
 #define SHT_RELA          4
+#define R_X86_64_GLOB_DAT 6
+#define R_X86_64_JMP_SLOT 7
 #define R_X86_64_RELATIVE 8
 #define PF_X              1
 #define PF_W              2
 #define PF_R              4
+#define DT_NULL           0
+#define DT_NEEDED         1
+#define DT_STRTAB         5
+#define DT_SYMTAB         6
+
+
+typedef struct {
+  long d_tag;
+  union {
+    unsigned long d_val;
+    unsigned long d_ptr;
+  } d_un;
+} Elf64_Dyn;
 
 
 typedef struct {

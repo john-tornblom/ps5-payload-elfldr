@@ -115,6 +115,16 @@ pt_copyin(pid_t pid, void* buf, intptr_t addr, size_t len) {
   return 0;
 }
 
+int
+pt_copyout(pid_t pid, intptr_t addr, void* buf, size_t len) {
+  struct ptrace_io_desc iod = {
+    .piod_op = PIOD_READ_D,
+    .piod_offs = (void*)addr,
+    .piod_addr = buf,
+    .piod_len = len};
+  return ptrace(PT_IO, pid, (intptr_t)&iod, 0);
+}
+
 
 int
 pt_setchar(pid_t pid, intptr_t addr, char val) {

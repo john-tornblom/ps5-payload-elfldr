@@ -38,7 +38,179 @@ along with this program; see the file COPYING. If not, see
 		     (((x) & PF_X) ? PROT_EXEC  : 0))
 
 
+/**
+ * Context structure for the ELF loader.
+ **/
+typedef struct elfldr_ctx {
+  uint8_t* elf;
+  pid_t    pid;
+
+  intptr_t base_addr;
+  size_t   base_size;
+
+  intptr_t symtab;
+  intptr_t strtab;
+} elfldr_ctx_t;
+
+
 #include "payload_launchpad_elf.c"
+
+
+/**
+* Parse a R_X86_64_RELATIVE relocatable.
+**/
+static int
+r_relative(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
+  intptr_t loc = ctx->base_addr + rela->r_offset;
+  intptr_t val = ctx->base_addr + rela->r_addend;
+
+  return pt_setlong(ctx->pid, loc, val);
+}
+
+
+/**
+* Parse a R_X86_64_JUMP_SLOT relocatable.
+**/
+static int
+r_jmp_slot(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
+  return -1;
+}
+
+
+/**
+* Parse a R_X86_64_GLOB_DAT relocatable.
+**/
+static int
+r_glob_dat(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
+  return -1;
+}
+
+
+/**
+ * Parse a PT_LOAD program header.
+ **/
+static int
+pt_load(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
+  intptr_t addr = ctx->base_addr + phdr->p_vaddr;
+  size_t memsz = ROUND_PG(phdr->p_memsz);
+
+  if((addr=pt_mmap(ctx->pid, addr, memsz, PROT_WRITE | PROT_READ,
+		   MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
+		   -1, 0)) == -1) {
+    pt_perror(ctx->pid, "[elfldr.elf] mmap");
+    return -1;
+  }
+
+  if(pt_copyin(ctx->pid, ctx->elf+phdr->p_offset, addr, phdr->p_memsz)) {
+    pt_perror(ctx->pid, "[elfldr.elf] pt_copyin");
+    return -1;
+  }
+
+  return 0;
+}
+
+
+/**
+ * Reload a PT_LOAD program header with executable permissions.
+ **/
+static int
+pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
+  intptr_t addr = ctx->base_addr + phdr->p_vaddr;
+  size_t memsz = ROUND_PG(phdr->p_memsz);
+  int prot = PFLAGS(phdr->p_flags);
+  int alias_fd = -1;
+  int shm_fd = -1;
+  void* data = 0;
+  int error = 0;
+
+  if(!(data=malloc(memsz))) {
+    perror("[elfldr.elf] malloc");
+    return -1;
+  }
+
+  // Backup data
+  else if(pt_copyout(ctx->pid, addr, data, memsz)) {
+    pt_perror(ctx->pid, "[elfldr.elf] pt_copyout");
+    error = -1;
+  }
+
+  // Create shm with executable permissions.
+  else if((shm_fd=pt_jitshm_create(ctx->pid, 0, memsz,
+				   prot | PROT_READ | PROT_WRITE)) < 0) {
+    pt_perror(ctx->pid, "[elfldr.elf] jitshm_create");
+    error = -1;
+  }
+
+  // Map shm into an executable address space.
+  else if((addr=pt_mmap(ctx->pid, addr, memsz, prot, MAP_FIXED | MAP_SHARED,
+			shm_fd, 0)) == -1) {
+    pt_perror(ctx->pid, "[elfldr.elf] mmap");
+    error = -1;
+  }
+
+  // Create an shm alias fd with write permissions.
+  else if((alias_fd=pt_jitshm_alias(ctx->pid, shm_fd,
+				    PROT_READ | PROT_WRITE)) < 0) {
+    pt_perror(ctx->pid, "[elfldr.elf] jitshm_alias");
+    error = -1;
+  }
+
+  // Map shm alias into a writable address space.
+  else if((addr=pt_mmap(ctx->pid, 0, memsz, PROT_READ | PROT_WRITE, MAP_SHARED,
+			alias_fd, 0)) == -1) {
+    pt_perror(ctx->pid, "[elfldr.elf] mmap");
+    error = -1;
+  }
+
+  // Resore data
+  else {
+    if(pt_copyin(ctx->pid, data, addr, memsz)) {
+      pt_perror(ctx->pid, "[elfldr.elf] pt_copyin");
+      error = -1;
+    }
+    pt_munmap(ctx->pid, addr, memsz);
+  }
+
+  free(data);
+  pt_close(ctx->pid, alias_fd);
+  pt_close(ctx->pid, shm_fd);
+
+  return error;
+}
+
+
+/**
+ * Parse a PT_DYNAMIC program header.
+ **/
+static int
+pt_dynamic(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
+  Elf64_Dyn *dyn = (Elf64_Dyn*)(ctx->elf + phdr->p_offset);
+
+  for(size_t i=0; dyn[i].d_tag!=DT_NULL; i++) {
+    intptr_t addr = ctx->base_addr + dyn[i].d_un.d_ptr;
+
+    switch(dyn[i].d_tag) {
+    case DT_SYMTAB:
+      ctx->symtab = addr;
+      break;
+
+    case DT_STRTAB:
+      ctx->strtab = addr;
+      break;
+    }
+  }
+
+  return pt_load(ctx, phdr);
+}
+
+
+/**
+ * Parse a DT_NEEDED section.
+ **/
+static int
+dt_needed(elfldr_ctx_t *ctx, intptr_t basename) {
+  return -1;
+}
 
 
 /**
@@ -50,8 +222,7 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
   Elf64_Phdr *phdr = (Elf64_Phdr*)(elf + ehdr->e_phoff);
   Elf64_Shdr *shdr = (Elf64_Shdr*)(elf + ehdr->e_shoff);
 
-  intptr_t base_addr = -1;
-  size_t base_size = 0;
+  elfldr_ctx_t ctx = {.elf = elf, .pid=pid};
 
   size_t min_vaddr = -1;
   size_t max_vaddr = 0;
@@ -67,10 +238,6 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
 
   // Compute size of virtual memory region.
   for(int i=0; i<ehdr->e_phnum; i++) {
-    if(phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0) {
-      continue;
-    }
-
     if(phdr[i].p_vaddr < min_vaddr) {
       min_vaddr = phdr[i].p_vaddr;
     }
@@ -82,13 +249,14 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
 
   min_vaddr = TRUNC_PG(min_vaddr);
   max_vaddr = ROUND_PG(max_vaddr);
-  base_size = max_vaddr - min_vaddr;
+  ctx.base_size = max_vaddr - min_vaddr;
 
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+  int prot = PROT_READ | PROT_WRITE;
   if(ehdr->e_type == ET_DYN) {
-    base_addr = 0;
+    ctx.base_addr = 0;
   } else if(ehdr->e_type == ET_EXEC) {
-    base_addr = min_vaddr;
+    ctx.base_addr = min_vaddr;
     flags |= MAP_FIXED;
   } else {
     puts("[elfldr.elf] elfldr_load: ELF type not supported");
@@ -96,77 +264,39 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
   }
 
   // Reserve an address space of sufficient size.
-  if((base_addr=pt_mmap(pid, base_addr, base_size, PROT_NONE,
-			flags, -1, 0)) == -1) {
+  if((ctx.base_addr=pt_mmap(pid, ctx.base_addr, ctx.base_size, prot,
+			    flags, -1, 0)) == -1) {
     pt_perror(pid, "[elfldr.elf] pt_mmap");
     return 0;
   }
 
-  // Commit segments to reserved address space.
-  for(int i=0; i<ehdr->e_phnum; i++) {
-    size_t aligned_memsz = ROUND_PG(phdr[i].p_memsz);
-    intptr_t addr = base_addr + phdr[i].p_vaddr;
-    int alias_fd = -1;
-    int shm_fd = -1;
+  // Parse program headers.
+  for(int i=0; i<ehdr->e_phnum && !error; i++) {
+    switch(phdr[i].p_type) {
+    case PT_LOAD:
+      error = pt_load(&ctx, &phdr[i]);
+      break;
 
-    if(phdr[i].p_memsz == 0) {
+    case PT_DYNAMIC:
+      error = pt_dynamic(&ctx, &phdr[i]);
+      break;
+    }
+  }
+
+  // Load needed shared libraries.
+  for(int i=0; i<ehdr->e_phnum && !error; i++) {
+    if(phdr[i].p_type != PT_DYNAMIC) {
       continue;
     }
-
-    if(phdr[i].p_flags & PF_X) {
-      if((shm_fd=pt_jitshm_create(pid, 0, aligned_memsz,
-				  PROT_WRITE | PFLAGS(phdr[i].p_flags))) < 0) {
-	pt_perror(pid, "[elfldr.elf] pt_jitshm_create");
-	error = 1;
-	break;
-      }
-
-      if((addr=pt_mmap(pid, addr, aligned_memsz, PFLAGS(phdr[i].p_flags),
-		       MAP_FIXED | MAP_SHARED, shm_fd, 0)) == -1) {
-	pt_perror(pid, "[elfldr.elf] pt_mmap");
-	error = 1;
-	break;
-      }
-
-      if((alias_fd=pt_jitshm_alias(pid, shm_fd, PROT_WRITE | PROT_READ)) < 0) {
-	pt_perror(pid, "[elfldr.elf] pt_jitshm_alias");
-	error = 1;
-	break;
-      }
-
-      if((addr=pt_mmap(pid, 0, aligned_memsz, PROT_WRITE | PROT_READ,
-		       MAP_SHARED, alias_fd, 0)) == -1) {
-	pt_perror(pid, "[elfldr.elf] pt_mmap");
-	error = 1;
-	break;
-      }
-
-      if(pt_copyin(pid, elf + phdr[i].p_offset, addr, phdr[i].p_memsz)) {
-	pt_perror(pid, "[elfldr.elf] pt_copyin");
-	error = 1;
-	break;
-      }
-
-      pt_munmap(pid, addr, aligned_memsz);
-      pt_close(pid, alias_fd);
-      pt_close(pid, shm_fd);
-    } else {
-      if((addr=pt_mmap(pid, addr, aligned_memsz, PROT_WRITE,
-		       MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
-		       -1, 0)) == -1) {
-	pt_perror(pid, "[elfldr.elf] pt_mmap");
-	error = 1;
-	break;
-      }
-      if(pt_copyin(pid, elf + phdr[i].p_offset, addr, phdr[i].p_memsz)) {
-	pt_perror(pid, "[elfldr.elf] pt_copyin");
-	error = 1;
-	break;
+    for(Elf64_Dyn *dyn=(Elf64_Dyn*)(elf + phdr[i].p_offset);
+	dyn->d_tag != DT_NULL && !error; dyn++) {
+      if(dyn->d_tag == DT_NEEDED) {
+	error = dt_needed(&ctx, ctx.strtab + dyn->d_un.d_val);
       }
     }
   }
 
-  // Relocate positional independent symbols.
+  // Apply relocations.
   for(int i=0; i<ehdr->e_shnum && !error; i++) {
     if(shdr[i].sh_type != SHT_RELA) {
       continue;
@@ -174,40 +304,48 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
 
     Elf64_Rela* rela = (Elf64_Rela*)(elf + shdr[i].sh_offset);
     for(int j=0; j<shdr[i].sh_size/sizeof(Elf64_Rela); j++) {
-      if((rela[j].r_info & 0xffffffffl) == R_X86_64_RELATIVE) {
-	intptr_t value_addr = (base_addr + rela[j].r_offset);
-	intptr_t value = base_addr + rela[j].r_addend;
-	if(pt_copyin(pid, &value, value_addr, 8)) {
-	  pt_perror(pid, "[elfldr.elf] pt_copyin");
-	  error = 1;
-	  break;
-	}
+
+      switch(rela[j].r_info & 0xffffffffl) {
+      case R_X86_64_RELATIVE:
+	error = r_relative(&ctx, &rela[j]);
+	break;
+
+      case R_X86_64_JMP_SLOT:
+	error = r_jmp_slot(&ctx, &rela[j]);
+	break;
+
+      case R_X86_64_GLOB_DAT:
+	error = r_glob_dat(&ctx, &rela[j]);
+	break;
       }
     }
   }
 
   // Set protection bits on mapped segments.
   for(int i=0; i<ehdr->e_phnum && !error; i++) {
-    size_t aligned_memsz = ROUND_PG(phdr[i].p_memsz);
-    intptr_t addr = base_addr + phdr[i].p_vaddr;
-
     if(phdr[i].p_type != PT_LOAD || phdr[i].p_memsz == 0) {
       continue;
     }
 
-    if(pt_mprotect(pid, addr, aligned_memsz, PFLAGS(phdr[i].p_flags))) {
-      pt_perror(pid, "[elfldr.elf] pt_mprotect");
-      error = 1;
-      break;
+    if(phdr[i].p_flags & PF_X) {
+      error = pt_reload(&ctx, &phdr[i]);
+
+    } else {
+      if(pt_mprotect(pid, ctx.base_addr + phdr[i].p_vaddr,
+		     ROUND_PG(phdr[i].p_memsz),
+		     PFLAGS(phdr[i].p_flags))) {
+	pt_perror(pid, "[elfldr.elf] pt_mprotect");
+	error = 1;
+      }
     }
   }
 
   if(error) {
-    pt_munmap(pid, base_addr, base_size);
+    pt_munmap(pid, ctx.base_addr, ctx.base_size);
     return 0;
   }
 
-  return base_addr + ehdr->e_entry;
+  return ctx.base_addr + ehdr->e_entry;
 }
 
 

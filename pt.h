@@ -63,6 +63,7 @@ int pt_setint(pid_t pid, intptr_t addr, int val);
 int pt_setlong(pid_t pid, intptr_t addr, long val);
 
 int pt_copyin(pid_t pid, void* buf, intptr_t addr, size_t len);
+int pt_copyout(pid_t pid, intptr_t addr, void* buf, size_t len);
 
 int pt_getint(pid_t pid, intptr_t addr);
 
