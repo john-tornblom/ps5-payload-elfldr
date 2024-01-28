@@ -47,9 +47,6 @@ typedef struct elfldr_ctx {
 
   intptr_t base_addr;
   size_t   base_size;
-
-  intptr_t symtab;
-  intptr_t strtab;
 } elfldr_ctx_t;
 
 
@@ -65,24 +62,6 @@ r_relative(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
   intptr_t val = ctx->base_addr + rela->r_addend;
 
   return pt_setlong(ctx->pid, loc, val);
-}
-
-
-/**
-* Parse a R_X86_64_JUMP_SLOT relocatable.
-**/
-static int
-r_jmp_slot(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
-  return -1;
-}
-
-
-/**
-* Parse a R_X86_64_GLOB_DAT relocatable.
-**/
-static int
-r_glob_dat(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
-  return -1;
 }
 
 
@@ -180,40 +159,6 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
 
 
 /**
- * Parse a PT_DYNAMIC program header.
- **/
-static int
-pt_dynamic(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
-  Elf64_Dyn *dyn = (Elf64_Dyn*)(ctx->elf + phdr->p_offset);
-
-  for(size_t i=0; dyn[i].d_tag!=DT_NULL; i++) {
-    intptr_t addr = ctx->base_addr + dyn[i].d_un.d_ptr;
-
-    switch(dyn[i].d_tag) {
-    case DT_SYMTAB:
-      ctx->symtab = addr;
-      break;
-
-    case DT_STRTAB:
-      ctx->strtab = addr;
-      break;
-    }
-  }
-
-  return pt_load(ctx, phdr);
-}
-
-
-/**
- * Parse a DT_NEEDED section.
- **/
-static int
-dt_needed(elfldr_ctx_t *ctx, intptr_t basename) {
-  return -1;
-}
-
-
-/**
  * Load an ELF into the address space of a process with the given pid.
  **/
 static intptr_t
@@ -277,22 +222,6 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
       error = pt_load(&ctx, &phdr[i]);
       break;
 
-    case PT_DYNAMIC:
-      error = pt_dynamic(&ctx, &phdr[i]);
-      break;
-    }
-  }
-
-  // Load needed shared libraries.
-  for(int i=0; i<ehdr->e_phnum && !error; i++) {
-    if(phdr[i].p_type != PT_DYNAMIC) {
-      continue;
-    }
-    for(Elf64_Dyn *dyn=(Elf64_Dyn*)(elf + phdr[i].p_offset);
-	dyn->d_tag != DT_NULL && !error; dyn++) {
-      if(dyn->d_tag == DT_NEEDED) {
-	error = dt_needed(&ctx, ctx.strtab + dyn->d_un.d_val);
-      }
     }
   }
 
@@ -308,14 +237,6 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
       switch(rela[j].r_info & 0xffffffffl) {
       case R_X86_64_RELATIVE:
 	error = r_relative(&ctx, &rela[j]);
-	break;
-
-      case R_X86_64_JMP_SLOT:
-	error = r_jmp_slot(&ctx, &rela[j]);
-	break;
-
-      case R_X86_64_GLOB_DAT:
-	error = r_glob_dat(&ctx, &rela[j]);
 	break;
       }
     }
@@ -752,9 +673,6 @@ elfldr_serve(const char* procname, uint16_t port) {
   int connfd;
   int srvfd;
 
-  //
-  // launch socket server
-  //
   if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     perror("[elfldr.elf] socket");
     return -1;
@@ -830,12 +748,12 @@ elfldr_socksrv(const char* procname, uint16_t port) {
   syscall(SYS_setsid);              // become session leader
   syscall(0x1d0, -1, "elfldr.elf"); // set proc name
   dup2(open("/dev/console", 1), 1); // set stdout to /dev/klog
-  dup2(open("/dev/console", 2), 1); // set stderr to /dev/klog
+  dup2(open("/dev/console", 1), 2); // set stderr to /dev/klog
 
   while(1) {
     puts("[elfldr.elf] Launching socket server...");
     elfldr_serve(procname, port);
-    sleep(10);
+    sleep(3);
   }
 
   // unreacheable
