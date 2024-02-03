@@ -1,55 +1,51 @@
-PS5_HOST    ?= ps5
-PS5_PORT    ?= 9020
-ELFLDR_PORT ?= 9021
+#   Copyright (C) 2024 John Törnblom
+#
+# This file is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; see the file COPYING. If not see
+# <http://www.gnu.org/licenses/>.
 
-CC  := clang
-LD  := ld.lld
-XXD := xxd
+ifndef PS5_PAYLOAD_SDK
+    $(error PS5_PAYLOAD_SDK is undefined)
+endif
 
-CFLAGS  := -target x86_64-pc-none -fPIE -fno-stack-protector -ffreestanding \
-           -fno-builtin -nostdlib -nostdinc -Wall -Werror
-LDFLAGS := -pie -T elf_x86_64.x
+PS5_HOST ?= ps5
+PS5_PORT ?= 9020
 
-OBJS := crt.o libc.o kern.o dynlib.o pt.o elfldr.o
+CC := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-cc
+LD := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-ld
 
-all: elfldr.elf hello_world.elf
+CFLAGS := -O2
 
-elfldr.elf: $(OBJS) main.o
-	$(LD) $(LDFLAGS) -o $@ $^
+all: bootstrap.elf
 
-elfldr-socksrv.elf: $(OBJS) main-socksrv.o
-	$(LD) $(LDFLAGS) -o $@ $^
+elfldr.elf: main.o pt.o elfldr.o
+	$(LD) $^ -lSceLibcInternal -lkernel_sys -o $@
 
-payload_launchpad.elf: payload_launchpad.o
-	$(LD) $(LDFLAGS) -o $@ $^
+bootstrap.elf: bootstrap.o pt.o elfldr.o
+	$(LD) $^ -lSceLibcInternal -lkernel_web -o $@
 
-hello_world.elf: hello_world.o
-	$(LD) $(LDFLAGS) -o $@ $^
-
-
-main.o: main.c elfldr-socksrv_elf.c
-	$(CC) -c $(CFLAGS) -DELFLDR_BOOTSTRAP -o $@ $<
-
-elfldr-socksrv_elf.c: elfldr-socksrv.elf
-	$(XXD) -i $^ > $@
-
-elfldr.o: elfldr.c payload_launchpad_elf.c
+bootstrap.o: bootstrap.c elfldr_elf.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-payload_launchpad_elf.c: payload_launchpad.elf
-	$(XXD) -i $^ > $@
-
-main-socksrv.o: main.c
-	$(CC) -c $(CFLAGS) -DELFLDR_PORT=$(ELFLDR_PORT) -o $@ $<
-
+elfldr_elf.c: elfldr.elf
+	xxd -i $^ > $@
 
 %.o: %.c
-	$(CC) -c $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $^
 
 clean:
-	rm -f *.o *.elf elfldr-socksrv_elf.c payload_launchpad_elf.c
+	rm -f *.o bootstrap.elf elfldr.elf elfldr_elf.c
 
-test: elfldr.elf hello_world.elf
-	nc -q0 $(PS5_HOST) $(PS5_PORT) < elfldr.elf
-	@sleep 1
-	nc -q0 $(PS5_HOST) $(ELFLDR_PORT) < hello_world.elf
+test: bootstrap.elf
+	nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
+

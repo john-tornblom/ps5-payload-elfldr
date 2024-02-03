@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 John Törnblom
+/* Copyright (C) 2024 John Törnblom
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the GNU General Public License as published by the
@@ -16,18 +16,10 @@ along with this program; see the file COPYING. If not, see
 
 #pragma once
 
-#include "libc.h"
+#include <unistd.h>
 
-/**
- * Execute an ELF inside the process with the given name, and pipe outout
- * to the given stdout file descriptor.
- **/
-int elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size);
+pid_t elfldr_find_pid(const char* name);
+int elfldr_exec(pid_t pid, uint8_t *elf);
 
-
-/**
- * Launch a socket server that accapts ELF files that are executed in the
- * process with given name, where stdout is piped to the connecting socket.
- **/
-int elfldr_socksrv(const char* procname, uint16_t port);
+pid_t elfldr_spawn(uint8_t *elf);
 

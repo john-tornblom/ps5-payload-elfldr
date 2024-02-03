@@ -1,5 +1,5 @@
 *~
 *.o
 *.elf
-elfldr-socksrv_elf.c
+elfldr_elf.c
 

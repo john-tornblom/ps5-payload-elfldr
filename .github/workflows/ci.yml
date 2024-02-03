@@ -20,19 +20,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-    - name: Checkout Source Code
+    - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Setup Build Env
-      run: sudo apt-get install build-essential clang lld
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        repository: john-tornblom/ps5-payload-sdk
+        path: ps5-payload-sdk
+
+    - name: Setup SDK
+      working-directory: ps5-payload-sdk
+      run: |
+        sudo apt update
+        sudo apt install wget build-essential clang clang-15 lld lld-15
+        make
+        make DESTDIR=${{ runner.tool_cache }}/ps5-payload-sdk install
+        echo PS5_PAYLOAD_SDK=${{ runner.tool_cache }}/ps5-payload-sdk >> $GITHUB_ENV
+        echo PS5_HOST=ps5 >> $GITHUB_ENV
+        echo PS5_PORT=9020 >> $GITHUB_ENV
 
     - name: Build Payload
-      run: make 
+      run: |
+        make clean all
 
     - name: Upload Payload
       uses: actions/upload-artifact@v3
       with:
         name: Payload
-        path: ./elfldr.elf
+        path: ./bootstrap.elf
         if-no-files-found: error
 

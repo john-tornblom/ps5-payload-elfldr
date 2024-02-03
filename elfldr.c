@@ -1,4 +1,4 @@
-/* Copyright (C) 2023 John Törnblom
+/* Copyright (C) 2024 John Törnblom
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the GNU General Public License as published by the
@@ -14,18 +14,31 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
-#include "dynlib.h"
-#include "elf.h"
-#include "kern.h"
-#include "libc.h"
+#include <elf.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+
+#include <ps5/kernel.h>
+#include <ps5/mdbg.h>
+
+#include "elfldr.h"
 #include "pt.h"
-#include "syscall.h"
 
 
-/**
- * Parameters for the ELF loader.
- **/
-#define ELFLDR_UNIX_SOCKET "/system_tmp/elfldr.sock"
+#ifndef IPV6_2292PKTOPTIONS
+#define IPV6_2292PKTOPTIONS 25
+#endif
 
 
 /**
@@ -50,7 +63,8 @@ typedef struct elfldr_ctx {
 } elfldr_ctx_t;
 
 
-#include "payload_launchpad_elf.c"
+int sceKernelSpawn(pid_t* pid, int dbg, const char* binpath, const char* rootpath,
+		   char* const argv[]);
 
 
 /**
@@ -61,7 +75,7 @@ r_relative(elfldr_ctx_t *ctx, Elf64_Rela* rela) {
   intptr_t loc = ctx->base_addr + rela->r_offset;
   intptr_t val = ctx->base_addr + rela->r_addend;
 
-  return pt_setlong(ctx->pid, loc, val);
+  return mdbg_copyin(ctx->pid, &val, loc, sizeof(val));
 }
 
 
@@ -80,8 +94,8 @@ pt_load(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
     return -1;
   }
 
-  if(pt_copyin(ctx->pid, ctx->elf+phdr->p_offset, addr, phdr->p_memsz)) {
-    pt_perror(ctx->pid, "[elfldr.elf] pt_copyin");
+  if(mdbg_copyin(ctx->pid, ctx->elf+phdr->p_offset, addr, phdr->p_memsz)) {
+    pt_perror(ctx->pid, "[elfldr.elf] mdbg_copyin");
     return -1;
   }
 
@@ -108,8 +122,8 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   }
 
   // Backup data
-  else if(pt_copyout(ctx->pid, addr, data, memsz)) {
-    pt_perror(ctx->pid, "[elfldr.elf] pt_copyout");
+  else if(mdbg_copyout(ctx->pid, addr, data, memsz)) {
+    pt_perror(ctx->pid, "[elfldr.elf] mdbg_copyout");
     error = -1;
   }
 
@@ -143,8 +157,8 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
 
   // Resore data
   else {
-    if(pt_copyin(ctx->pid, data, addr, memsz)) {
-      pt_perror(ctx->pid, "[elfldr.elf] pt_copyin");
+    if(mdbg_copyin(ctx->pid, data, addr, memsz)) {
+      pt_perror(ctx->pid, "[elfldr.elf] mdbg_copyin");
       error = -1;
     }
     pt_munmap(ctx->pid, addr, memsz);
@@ -162,7 +176,7 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
  * Load an ELF into the address space of a process with the given pid.
  **/
 static intptr_t
-elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
+elfldr_load(pid_t pid, uint8_t *elf) {
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)elf;
   Elf64_Phdr *phdr = (Elf64_Phdr*)(elf + ehdr->e_phoff);
   Elf64_Shdr *shdr = (Elf64_Shdr*)(elf + ehdr->e_shoff);
@@ -273,7 +287,7 @@ elfldr_load(pid_t pid, uint8_t *elf, size_t size) {
 /**
  * Create payload args in the address space of the process with the given pid.
  **/
-intptr_t
+static intptr_t
 elfldr_payload_args(pid_t pid) {
   int victim_sock;
   int master_sock;
@@ -292,12 +306,12 @@ elfldr_payload_args(pid_t pid) {
     return 0;
   }
 
-  pt_setint(pid, buf+0x00, 20);
-  pt_setint(pid, buf+0x04, IPPROTO_IPV6);
-  pt_setint(pid, buf+0x08, IPV6_TCLASS);
-  pt_setint(pid, buf+0x0c, 0);
-  pt_setint(pid, buf+0x10, 0);
-  pt_setint(pid, buf+0x14, 0);
+  mdbg_setint(pid, buf+0x00, 20);
+  mdbg_setint(pid, buf+0x04, IPPROTO_IPV6);
+  mdbg_setint(pid, buf+0x08, IPV6_TCLASS);
+  mdbg_setint(pid, buf+0x0c, 0);
+  mdbg_setint(pid, buf+0x10, 0);
+  mdbg_setint(pid, buf+0x14, 0);
   if(pt_setsockopt(pid, master_sock, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, buf, 24)) {
     pt_perror(pid, "[elfldr.elf] pt_setsockopt");
     return 0;
@@ -308,18 +322,18 @@ elfldr_payload_args(pid_t pid) {
     return 0;
   }
 
-  pt_setint(pid, buf+0x00, 0);
-  pt_setint(pid, buf+0x04, 0);
-  pt_setint(pid, buf+0x08, 0);
-  pt_setint(pid, buf+0x0c, 0);
-  pt_setint(pid, buf+0x10, 0);
+  mdbg_setint(pid, buf+0x00, 0);
+  mdbg_setint(pid, buf+0x04, 0);
+  mdbg_setint(pid, buf+0x08, 0);
+  mdbg_setint(pid, buf+0x0c, 0);
+  mdbg_setint(pid, buf+0x10, 0);
   if(pt_setsockopt(pid, victim_sock, IPPROTO_IPV6, IPV6_PKTINFO, buf, 20)) {
     pt_perror(pid, "[elfldr.elf] pt_setsockopt");
     return 0;
   }
 
-  if(kern_overlap_sockets(pid, master_sock, victim_sock)) {
-    puts("[elfldr.elf] kern_overlap_sockets() failed");
+  if(kernel_overlap_sockets(pid, master_sock, victim_sock)) {
+    puts("[elfldr.elf] kernel_overlap_sockets() failed");
     return 0;
   }
 
@@ -331,32 +345,150 @@ elfldr_payload_args(pid_t pid) {
   pipe1 = pt_getint(pid, buf+4);
 
   intptr_t args       = buf;
-  intptr_t dlsym      = dynlib_resolve_sceKernelDlsym(pid);
+  intptr_t dlsym      = pt_resolve(pid, "LwG8g3niqwA");
   intptr_t rwpipe     = buf + 0x100;
   intptr_t rwpair     = buf + 0x200;
-  intptr_t kpipe_addr = kern_get_proc_file(pid, pipe0);
+  intptr_t kpipe_addr = kernel_get_proc_file(pid, pipe0);
   intptr_t payloadout = buf + 0x300;
 
-  pt_setlong(pid, args + 0x00, dlsym);
-  pt_setlong(pid, args + 0x08, rwpipe);
-  pt_setlong(pid, args + 0x10, rwpair);
-  pt_setlong(pid, args + 0x18, kpipe_addr);
-  pt_setlong(pid, args + 0x20, kern_get_data_baseaddr());
-  pt_setlong(pid, args + 0x28, payloadout);
-  pt_setint(pid, rwpipe + 0, pipe0);
-  pt_setint(pid, rwpipe + 4, pipe1);
-  pt_setint(pid, rwpair + 0, master_sock);
-  pt_setint(pid, rwpair + 4, victim_sock);
-  pt_setint(pid, payloadout, 0);
+  mdbg_setlong(pid, args + 0x00, dlsym);
+  mdbg_setlong(pid, args + 0x08, rwpipe);
+  mdbg_setlong(pid, args + 0x10, rwpair);
+  mdbg_setlong(pid, args + 0x18, kpipe_addr);
+  mdbg_setlong(pid, args + 0x20, KERNEL_ADDRESS_DATA_BASE);
+  mdbg_setlong(pid, args + 0x28, payloadout);
+  mdbg_setint(pid, rwpipe + 0, pipe0);
+  mdbg_setint(pid, rwpipe + 4, pipe1);
+  mdbg_setint(pid, rwpair + 0, master_sock);
+  mdbg_setint(pid, rwpair + 4, victim_sock);
+  mdbg_setint(pid, payloadout, 0);
 
   return args;
 }
 
 
-/**
- * Get the pid of a process with the given name.
- **/
-static pid_t
+static int
+elfldr_raise_privileges(pid_t pid) {
+  uint8_t caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+                      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+  intptr_t vnode;
+
+  if(!(vnode=kernel_get_root_vnode())) {
+    puts("[elfldr.elf] kernel_get_root_vnode() failed");
+    return -1;
+  }
+  if(kernel_set_proc_rootdir(pid, vnode)) {
+    puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
+    return -1;
+  }
+  if(kernel_set_ucred_uid(pid, 0)) {
+    puts("[elfldr.elf] kernel_set_ucred_uid() failed");
+    return -1;
+  }
+
+  if(kernel_set_ucred_caps(pid, caps)) {
+    puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    return -1;
+  }
+
+  return 0;
+}
+
+
+int
+elfldr_exec(pid_t pid, uint8_t *elf) {
+  intptr_t entry;
+  intptr_t args;
+  struct reg r;
+
+  if(pt_getregs(pid, &r)) {
+    perror("[elfldr.elf] pt_getregs");
+    return -1;
+  }
+
+  if(!(entry=elfldr_load(pid, elf))) {
+    puts("[elfldr.elf] elfldr_load() failed");
+    return -1;
+  }
+
+  if(!(args=elfldr_payload_args(pid))) {
+    puts("[elfldr.elf] elfldr_payload_args() failed");
+    return -1;
+  }
+
+  r.r_rip = entry;
+  r.r_rdi = args;
+
+  if(pt_setregs(pid, &r)) {
+    perror("[elfldr.elf] pt_setregs");
+    return -1;
+  }
+
+  return 0;
+}
+
+
+int
+elfldr_spawn(uint8_t *elf) {
+  uint8_t int3instr = 0xcc;
+  char* argv[] = {0, 0};
+  struct reg r = {0};
+  intptr_t brkpoint;
+  intptr_t rootdir;
+  pid_t pid = -1;
+
+  // SceSpZeroConf
+  argv[0] = "/system/vsh/app/NPXS40112/eboot.bin";
+  if(sceKernelSpawn(&pid, 1, argv[0], NULL, argv)) {
+    perror("sceKernelSpawn");
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(!(brkpoint=kernel_dynlib_entry_addr(pid, 0))) {
+    puts("[elfldr.elf] kernel_dynlib_entry_addr() failed");
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(mdbg_copyin(pid, &int3instr, brkpoint, sizeof(int3instr))) {
+    perror("[elfldr.elf] mdbg_copyin");
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(pt_continue(pid)) {
+    perror("[elfldr.elf] pt_continue");
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(waitpid(pid, 0, 0) == -1) {
+    perror("[elfldr.elf] waitpid");
+    pt_detach(pid);
+    return -1;
+  }
+
+  if(elfldr_raise_privileges(pid)) {
+    puts("[elfldr.elf] Unable to raise privileges");
+    pt_detach(pid);
+    return -1;
+  }
+  
+  if(elfldr_exec(pid, elf)) {
+    pt_setregs(pid, &r);
+  }
+
+  if(pt_detach(pid)) {
+    perror("[elfldr.elf] pt_detach");
+    return -1;
+  }
+
+  return pid;
+}
+
+
+pid_t
 elfldr_find_pid(const char* name) {
   int mib[4] = {1, 14, 8, 0};
   pid_t pid = -1;
@@ -394,368 +526,3 @@ elfldr_find_pid(const char* name) {
   return pid;
 }
 
-
-/**
- * Send a file descriptor to a process that listens on a UNIX domain socket
- * with the given socket path.
- **/
-static int
-elfldr_sendfd(const char *sockpath, int fd) {
-  struct sockaddr_un addr = {0};
-  struct msghdr msg = {0};
-  struct cmsghdr *cmsg;
-  uint8_t buf[24];
-  int sockfd;
-
-  addr.sun_family = AF_UNIX;
-  strcpy(addr.sun_path, sockpath);
-
-  memset(&msg, 0, sizeof(msg));
-  msg.msg_name = &addr;
-  msg.msg_namelen = sizeof(struct sockaddr_un);
-  msg.msg_control = buf;
-  msg.msg_controllen = sizeof(buf);
-  
-  memset(buf, 0, sizeof(buf));
-  cmsg = (struct cmsghdr *)buf;
-  cmsg->cmsg_level = SOL_SOCKET;
-  cmsg->cmsg_type  = SCM_RIGHTS;
-  cmsg->cmsg_len   = 20;
-  *((int *)&buf[16]) = fd;
-
-  if((sockfd=socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-    perror("[elfldr.elf] socket");
-    return -1;
-  }
-
-  if(sendmsg(sockfd, &msg, 0) < 0) {
-    perror("[elfldr.elf] sendmsg");
-    close(sockfd);
-    return -1;
-  }
-
-  return close(sockfd);
-}
-
-
-/**
- * Pipe stdout of a process with the given pid to a file descriptor, where
- * communication is done via a UNIX domain socket of the given socket path.
- **/
-static int
-elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
-  struct sockaddr_un addr = {0};
-  intptr_t ptbuf;
-  int sockfd;
-
-  if((ptbuf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-		    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
-    pt_perror(pid, "[elfldr.elf] pt_mmap");
-    return -1;
-  }
-
-  if((sockfd=pt_socket(pid, AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_socket");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    return -1;
-  }
-
-  addr.sun_family = AF_UNIX;
-  strcpy(addr.sun_path, sockpath);
-  pt_copyin(pid, &addr, ptbuf, sizeof(addr));
-  if(pt_bind(pid, sockfd, ptbuf, sizeof(addr))) {
-    pt_perror(pid, "[elfldr.elf] pt_bind");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if(elfldr_sendfd(sockpath, fd)) {
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  intptr_t hdr = ptbuf;
-  intptr_t iov = ptbuf + 0x100;
-  intptr_t control = ptbuf + 0x200;
-
-  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_name), 0);
-  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_namelen), 0);
-  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_iov), iov);
-  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_iovlen), 1);
-  pt_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_control), control);
-  pt_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_controllen), 24);
-  if(pt_recvmsg(pid, sockfd, hdr, 0) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_recvmsg");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if((fd=pt_getint(pid, control+16)) < 0) {
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if(pt_munmap(pid, ptbuf, PAGE_SIZE)) {
-    pt_perror(pid, "[elfldr.elf] pt_munmap");
-    pt_close(pid, sockfd);
-    pt_close(pid, fd);
-  }
-
-  if(pt_close(pid, sockfd)) {
-    pt_perror(pid, "[elfldr.elf] pt_close");
-    pt_close(pid, fd);
-    return -1;
-  }
-
-  return fd;
-}
-
-
-int
-elfldr_exec(const char* procname, int stdout, uint8_t *elf, size_t size) {
-  uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-                          0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-  uint8_t caps[16];
-  intptr_t payload_entry;
-  intptr_t payload_args;
-  intptr_t launch_entry;
-  struct reg jmp_reg;
-  struct reg bak_reg;
-  pid_t pid;
-
-  if((pid=elfldr_find_pid(procname)) < 0) {
-    puts("[elfldr.elf] elfldr_find_pid() failed");
-    return -1;
-  }
-
-  if(pt_attach(pid)) {
-    perror("[elfldr.elf] pt_attach");
-    return -1;
-  }
-
-  if(kern_get_ucred_caps(pid, caps)) {
-    puts("[elfldr.elf] kern_get_ucred_caps() failed");
-    pt_detach(pid);
-    return -1;
-  }
-
-  if(kern_set_ucred_caps(pid, privcaps)) {
-    puts("[elfldr.elf] kern_set_ucred_caps() failed");
-    pt_detach(pid);
-    return -1;
-  }
-
-  if(pt_getregs(pid, &bak_reg)) {
-    perror("[elfldr.elf] pt_getregs");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-  memcpy(&jmp_reg, &bak_reg, sizeof(jmp_reg));
-
-  if(stdout > 0) {
-    unlink(ELFLDR_UNIX_SOCKET);
-    if((stdout=elfldr_stdout(pid, ELFLDR_UNIX_SOCKET, stdout)) < 0) {
-      puts("[elfldr.elf] elfldr_stdout() failed");
-      kern_set_ucred_caps(pid, caps);
-      pt_detach(pid);
-      return -1;
-    }
-    unlink(ELFLDR_UNIX_SOCKET);
-  }
-
-  if(!(payload_entry=elfldr_load(pid, elf, size))) {
-    puts("[elfldr.elf] elfldr_load() failed");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-
-  if(!(payload_args=elfldr_payload_args(pid))) {
-    puts("[elfldr.elf] elfldr_args() failed");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-
-  if(!(launch_entry=elfldr_load(pid, payload_launchpad_elf,
-				payload_launchpad_elf_len))) {
-    puts("[elfldr.elf] elfldr_load() failed");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-
-  jmp_reg.r_rip = launch_entry;
-  jmp_reg.r_rsp -= 8;
-  jmp_reg.r_rdi = payload_entry;
-  jmp_reg.r_rsi = payload_args;
-  jmp_reg.r_rdx = stdout;
-  if(pt_setregs(pid, &jmp_reg)) {
-    perror("[elfldr.elf] pt_setregs");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-
-  if(pt_continue(pid)) {
-    perror("[elfldr.elf] pt_continue");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-  if(waitpid(pid, 0, 0) == -1) {
-    perror("[elfldr.elf] waitpid");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-  }
-
-  if(pt_setregs(pid, &bak_reg)) {
-    perror("[elfldr.elf] pt_setregs");
-    kern_set_ucred_caps(pid, caps);
-    pt_detach(pid);
-    return -1;
-  }
-
-  puts("[elfldr.elf] running ELF...");
-  kern_set_ucred_caps(pid, caps);
-  if(pt_detach(pid)) {
-    perror("[elfldr.elf] pt_detach");
-    return -1;
-  }
-
-  return 0;
-}
-
-
-/**
- * Read an ELF from a given socket connection.
- **/
-static ssize_t
-elfldr_read(int connfd, uint8_t **data) {
-  uint8_t buf[0x4000];
-  off_t offset = 0;
-  ssize_t len;
-
-  *data = 0;
-  while((len=read(connfd, buf, sizeof(buf)))) {
-    *data = realloc(*data, offset + len);
-    if(*data == 0) {
-      perror("[elfldr.elf] realloc");
-      return -1;
-    }
-
-    memcpy(*data + offset, buf, len);
-    offset += len;
-  }
-
-  return offset;
-}
-
-
-/**
- * Accept ELFs from the given port, and execute them inside the process
- * with the given name.
- **/
-int
-elfldr_serve(const char* procname, uint16_t port) {
-  struct sockaddr_in server_addr;
-  struct sockaddr_in client_addr;
-  socklen_t addr_len;
-
-  uint8_t *elf;
-  size_t size;
-
-  int connfd;
-  int srvfd;
-
-  if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    perror("[elfldr.elf] socket");
-    return -1;
-  }
-
-  if(setsockopt(srvfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
-    perror("[elfldr.elf] setsockopt");
-    close(srvfd);
-    return -1;
-  }
-
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
-
-  if(bind(srvfd, &server_addr, sizeof(server_addr)) != 0) {
-    perror("[elfldr.elf] bind");
-    close(srvfd);
-    return -1;
-  }
-
-  if(listen(srvfd, 5) != 0) {
-    perror("[elfldr.elf] listen");
-    close(srvfd);
-    return -1;
-  }
-
-  addr_len = sizeof(client_addr);
-  while(1) {
-    if((connfd=accept(srvfd, &client_addr, &addr_len)) < 0) {
-      perror("[elfldr.elf] accept");
-      close(connfd);
-      close(srvfd);
-      return -1;
-    }
-
-    // We got a connection, read ELF and launch it in the given process.
-    if((size=elfldr_read(connfd, &elf))) {
-      elfldr_exec(procname, connfd, elf, size);
-      free(elf);
-    }
-    close(connfd);
-  }
-  close(srvfd);
-
-  return 0;
-}
-
-
-int
-elfldr_socksrv(const char* procname, uint16_t port) {
-  pid_t pid;
-
-  // kill previous instances of elfldr.elf
-  while((pid=elfldr_find_pid("elfldr.elf")) > 0) {
-    if(kill(pid, SIGKILL)) {
-      perror("[elfldr.elf] kill");
-    }
-    sleep(1);
-  }
-
-  // fork process
-  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG)) < 0) {
-    perror("[elfldr.elf] rfork");
-    return -1;
-  }
-  // parent process should just return
-  if(pid) {
-    return pid;
-  }
-
-  // initialize child process
-  syscall(SYS_setsid);              // become session leader
-  syscall(0x1d0, -1, "elfldr.elf"); // set proc name
-  dup2(open("/dev/console", 1), 1); // set stdout to /dev/klog
-  dup2(open("/dev/console", 1), 2); // set stderr to /dev/klog
-
-  while(1) {
-    puts("[elfldr.elf] Launching socket server...");
-    elfldr_serve(procname, port);
-    sleep(3);
-  }
-
-  // unreacheable
-  return syscall(SYS_exit, 0);
-}

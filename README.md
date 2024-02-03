@@ -5,14 +5,15 @@ Unlike the ELF loaders bundled with those exploits, this one uses the ptrace
 syscall to load itself into the `ScePartyDaemon` process, hence will continue
 running in the background even when playing games. Furthermore, this ELF loader
 will also resume its execution when the PS5 returns from rest mode. Payloads that
-are loaded are executed in the `SceRedisServer` process, so if the payload crashes,
+are loaded are executed in induvidual processes, so if the payload crashes,
 the ELF loader will keep on running.
 
 ## Building
-On Debian-flavored operating systems, one can invoke the following commands to
-install dependencies and build the ELF loader.
+Assuming you have the [ps5-payload-sdk][sdk] installed on a POSIX machine,
+the ELF loader can be compiled using the following two commands:
+
 ```console
-john@localhost:ps5-payload-elfldr$ sudo apt-get install build-essential clang lld
+john@localhost:ps5-payload-elfldr$ export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 john@localhost:ps5-payload-elfldr$ make
 ```
 
@@ -20,7 +21,7 @@ john@localhost:ps5-payload-elfldr$ make
 To deploy the ELF loader itself, we first bootstrap via the ELF loader bundled
 with the exploit of your choice.
 ```console
-john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9020 < elfldr.elf
+john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9020 < bootstrap.elf
 ```
 **Note**: recent versions of the [BD-J ps5-payload-loader][bdj] include a binary
 version of this ELF loader which can be launched directly from the menu system.
@@ -38,6 +39,7 @@ please file an issue before you start to work on you changes. This will allow us
 to discuss the solution properly before you commit time and effort.
 
 [bdj]: https://github.com/john-tornblom/bdj-sdk/tree/master/samples/ps5-payload-loader
+[sdk]: https://github.com/john-tornblom/ps5-payload-sdk
 [webkit]: https://github.com/Cryptogenic/PS5-IPV6-Kernel-Exploit
 [issues]: https://github.com/john-tornblom/ps5-payload-elfldr/issues/new
 
