@@ -235,7 +235,6 @@ elfldr_load(pid_t pid, uint8_t *elf) {
     case PT_LOAD:
       error = pt_load(&ctx, &phdr[i]);
       break;
-
     }
   }
 
@@ -247,7 +246,6 @@ elfldr_load(pid_t pid, uint8_t *elf) {
 
     Elf64_Rela* rela = (Elf64_Rela*)(elf + shdr[i].sh_offset);
     for(int j=0; j<shdr[i].sh_size/sizeof(Elf64_Rela); j++) {
-
       switch(rela[j].r_info & 0xffffffffl) {
       case R_X86_64_RELATIVE:
 	error = r_relative(&ctx, &rela[j]);
@@ -264,7 +262,6 @@ elfldr_load(pid_t pid, uint8_t *elf) {
 
     if(phdr[i].p_flags & PF_X) {
       error = pt_reload(&ctx, &phdr[i]);
-
     } else {
       if(pt_mprotect(pid, ctx.base_addr + phdr[i].p_vaddr,
 		     ROUND_PG(phdr[i].p_memsz),

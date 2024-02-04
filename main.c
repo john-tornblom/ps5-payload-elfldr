@@ -240,7 +240,6 @@ int main() {
   pid_t pid;
 
   signal(SIGCHLD, SIG_IGN);
-
   if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
     return pid;
   }
