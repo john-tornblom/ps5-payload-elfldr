@@ -415,6 +415,9 @@ elfldr_exec(pid_t pid, uint8_t *elf) {
 
   r.r_rip = entry;
   r.r_rdi = args;
+  r.r_rsi = 0; // argc
+  r.r_rdx = 0; // argv
+  r.r_r10 = 0; // envp
 
   if(pt_setregs(pid, &r)) {
     perror("[elfldr.elf] pt_setregs");
