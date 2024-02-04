@@ -81,55 +81,6 @@ readsock(int fd) {
 
 
 /**
- * Read an ELF from a given path.
- **/
-static uint8_t*
-readfile(const char* path) {
-  uint8_t* buf;
-  FILE* file;
-  long len;
-  
-  if(!(file=fopen(path, "rb"))) {
-    perror("fopen");
-    return 0;
-  }
-  
-  if(fseek(file, 0, SEEK_END)) {
-    perror("fseek");
-    return 0;
-  }
-  
-  if((len=ftell(file)) < 0) {
-    perror("ftell");
-    return 0;
-  }
-
-  if(fseek(file, 0, SEEK_SET)) {
-    perror("fseek");
-    return 0;
-  }
-
-  if(!(buf=malloc(len))) {
-    return 0;
-  }
-  
-  if(fread(buf, 1, len, file) != len) {
-    perror("fread");
-    free(buf);
-    return 0;
-  }
-
-  if(fclose(file)) {
-    perror("fclose");
-    free(buf);
-    return 0;
-  }
-
-  return buf;
-}
-
-
-/**
  *
  **/
 static int
