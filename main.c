@@ -19,6 +19,7 @@ along with this program; see the file COPYING. If not, see
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +52,24 @@ typedef struct notify_request {
  * Send a UI notification request.
  **/
 int sceKernelSendNotificationRequest(int, notify_request_t*, size_t, int);
+
+
+/**
+ * Send a notification to the UI and stdout.
+ **/
+static void
+notify(const char *fmt, ...) {
+  notify_request_t req;
+  va_list args;
+
+  bzero(&req, sizeof req);
+  va_start(args, fmt);
+  vsnprintf(req.message, sizeof req.message, fmt, args);
+  va_end(args);
+
+  sceKernelSendNotificationRequest(0, &req, sizeof req, 0);
+  printf("[%s] %s\n", PROCNAME, req.message);
+}
 
 
 /**
@@ -89,7 +108,6 @@ serve_elfldr(uint16_t port) {
   struct sockaddr_in cliaddr;
   char ip[INET_ADDRSTRLEN];
   struct ifaddrs *ifaddr;
-  notify_request_t req;
   int ifaddr_wait = 1;
   socklen_t socklen;
   uint8_t* elf;
@@ -125,9 +143,7 @@ serve_elfldr(uint16_t port) {
     }
     ifaddr_wait = 0;
 
-    bzero(&req, sizeof(req));
-    sprintf(req.message, "elfldr.elf running on %s:%d (%s)", ip, port, ifa->ifa_name);
-    printf("[elfldr.elf] %s\n", req.message);
+    notify("Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
   }
 
   freeifaddrs(ifaddr);

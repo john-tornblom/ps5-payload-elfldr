@@ -434,7 +434,6 @@ elfldr_spawn(uint8_t *elf) {
   char* argv[] = {0, 0};
   struct reg r = {0};
   intptr_t brkpoint;
-  intptr_t rootdir;
   pid_t pid = -1;
 
   // SceSpZeroConf
