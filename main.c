@@ -18,6 +18,7 @@ along with this program; see the file COPYING. If not, see
 #include <fcntl.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -27,10 +28,12 @@ along with this program; see the file COPYING. If not, see
 
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
+#include "pt.h"
 
 
 /**
@@ -102,6 +105,45 @@ readsock(int fd) {
 /**
  *
  **/
+static void*
+serve_thread(void* args) {
+  int fd = (int)(long)args;
+  uint8_t* elf;
+  int status;
+  pid_t pid;
+
+  if(!(elf=readsock(fd))) {
+    close(fd);
+    return 0;
+  }
+
+  if(memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
+    close(fd);
+    free(elf);
+    return 0;
+  }
+
+  if((pid=elfldr_spawn(elf)) < 0) {
+    close(fd);
+    free(elf);
+    return 0;
+  }
+
+  free(elf);
+
+  waitpid(pid, &status,  WTRAPPED | WUNTRACED);
+  if(WIFSTOPPED(status)) {
+    printf("PID %d received the fatal POSIX signal %d\n", pid, WSTOPSIG(status));
+    pt_continue(pid, SIGKILL);
+  }
+
+  return 0;
+}
+
+
+/**
+ *
+ **/
 static int
 serve_elfldr(uint16_t port) {
   struct sockaddr_in srvaddr;
@@ -110,7 +152,7 @@ serve_elfldr(uint16_t port) {
   struct ifaddrs *ifaddr;
   int ifaddr_wait = 1;
   socklen_t socklen;
-  uint8_t* elf;
+  pthread_t trd;
   int connfd;
   int srvfd;
 
@@ -143,7 +185,7 @@ serve_elfldr(uint16_t port) {
     }
     ifaddr_wait = 0;
 
-    notify("Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
+    notify("Serving ELF loader on %s:%d (%s)", ip, port, ifa->ifa_name);
   }
 
   freeifaddrs(ifaddr);
@@ -183,19 +225,7 @@ serve_elfldr(uint16_t port) {
       perror("[elfldr.elf] accept");
       break;
     }
-
-    if(!(elf=readsock(connfd))) {
-      close(connfd);
-      continue;
-    }
-
-    if(!memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
-      elfldr_spawn(elf);
-    } else {
-      write(connfd, "Not an ELF file\n", 16);
-    }
-    free(elf);
-    close(connfd);
+    pthread_create(&trd, NULL, serve_thread, (void*)(long)connfd);
   }
 
   return close(srvfd);

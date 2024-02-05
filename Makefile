@@ -24,7 +24,7 @@ PS5_PORT ?= 9020
 CC := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-cc
 LD := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-ld
 
-CFLAGS := -O2 -Wall -Werror
+CFLAGS := -g -Wall -Werror
 
 all: bootstrap.elf
 

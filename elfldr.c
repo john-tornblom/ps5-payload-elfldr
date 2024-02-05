@@ -456,7 +456,7 @@ elfldr_spawn(uint8_t *elf) {
     return -1;
   }
 
-  if(pt_continue(pid)) {
+  if(pt_continue(pid, SIGCONT)) {
     perror("[elfldr.elf] pt_continue");
     pt_detach(pid);
     return -1;

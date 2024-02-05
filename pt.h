@@ -24,7 +24,7 @@ along with this program; see the file COPYING. If not, see
 int pt_attach(pid_t pid);
 int pt_detach(pid_t pid);
 int pt_step(pid_t pid);
-int pt_continue(pid_t pid);
+int pt_continue(pid_t pid, int sig);
 
 int pt_getregs(pid_t pid, struct reg *r);
 int pt_setregs(pid_t pid, const struct reg *r);

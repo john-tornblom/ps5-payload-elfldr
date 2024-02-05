@@ -118,8 +118,8 @@ pt_step(int pid) {
 
 
 int
-pt_continue(pid_t pid) {
-  if(sys_ptrace(PT_CONTINUE, pid, (caddr_t)1, SIGCONT) == -1) {
+pt_continue(pid_t pid, int sig) {
+  if(sys_ptrace(PT_CONTINUE, pid, (caddr_t)1, sig) == -1) {
     return -1;
   }
 
