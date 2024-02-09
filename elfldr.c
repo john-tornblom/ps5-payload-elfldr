@@ -135,7 +135,8 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   }
 
   // Map shm into an executable address space.
-  else if((addr=pt_mmap(ctx->pid, addr, memsz, prot, MAP_FIXED | MAP_SHARED,
+  else if((addr=pt_mmap(ctx->pid, addr, memsz, prot,
+			MAP_FIXED | MAP_PRIVATE,
 			shm_fd, 0)) == -1) {
     pt_perror(ctx->pid, "[elfldr.elf] mmap");
     error = -1;
