@@ -504,6 +504,7 @@ elfldr_spawn(uint8_t* elf) {
 
   if((pid=syscall(SYS_rfork, RFPROC | RFCFDG)) < 0) {
     perror("rfork");
+    close(kq);
     return pid;
   }
 
@@ -591,6 +592,7 @@ elfldr_spawn(uint8_t* elf) {
   // Execute the ELF
   elfldr_set_procname(pid, "homebrew");
   if(elfldr_exec(pid, elf)) {
+    perror("[elfldr.elf] pt_detach");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
