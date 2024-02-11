@@ -2,10 +2,10 @@
 This is an ELF loader for PS5 systems that have been jailbroken using either the
 [BD-J ps5-payload-loader][bdj], or the [webkit approached from Specter][webkit].
 Unlike the ELF loaders bundled with those exploits, this one uses the ptrace
-syscall to load itself into the `ScePartyDaemon` process, hence will continue
+syscall to bootstrap itself via the `SceRedisServer` process, and will continue
 running in the background even when playing games. Furthermore, this ELF loader
 will also resume its execution when the PS5 returns from rest mode. Payloads that
-are loaded are executed in induvidual processes, so if the payload crashes,
+are loaded are executed in induvidual processes, so if a payload crashes,
 the ELF loader will keep on running.
 
 ## Building
@@ -27,7 +27,7 @@ john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9020 < bootstrap.elf
 version of this ELF loader which can be launched directly from the menu system.
 
 Once the payload has been launched, a new socket server is started from the
-`ScePartyDaemon` process that accepts ELFs on port 9021:
+process that accepts ELFs on port 9021:
 ```console
 john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9021 < hello_world.elf
 ```

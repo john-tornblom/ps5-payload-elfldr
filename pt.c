@@ -287,6 +287,7 @@ pt_setsockopt(pid_t pid, int fd, int level, int optname, intptr_t optval,
 			 optlen, 0);
 }
 
+
 int
 pt_close(pid_t pid, int fd) {
   return (int)pt_syscall(pid, SYS_close, fd);
@@ -296,7 +297,7 @@ pt_close(pid_t pid, int fd) {
 int
 pt_pipe(pid_t pid, intptr_t pipefd) {
   intptr_t faddr = pt_resolve(pid, "-Jp7F+pXxNg");
-  return (int)pt_call(pid, faddr, pipefd, 0, 0, 0, 0, 0);
+  return (int)pt_call(pid, faddr, pipefd);
 }
 
 

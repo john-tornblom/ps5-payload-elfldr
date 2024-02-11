@@ -17,12 +17,14 @@ along with this program; see the file COPYING. If not, see
 #include <elf.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
@@ -63,8 +65,10 @@ typedef struct elfldr_ctx {
 } elfldr_ctx_t;
 
 
-int sceKernelSpawn(pid_t* pid, int dbg, const char* binpath, const char* rootpath,
-		   char* const argv[]);
+/**
+ * Absolute path to the SceSpZeroConf eboot.
+ **/
+static const char* SceSpZeroConf = "/system/vsh/app/NPXS40112/eboot.bin";
 
 
 /**
@@ -365,36 +369,11 @@ elfldr_payload_args(pid_t pid) {
 }
 
 
+/**
+ * Prepare registers of a process for execution of an ELF.
+ **/
 static int
-elfldr_raise_privileges(pid_t pid) {
-  uint8_t caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-                      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-  intptr_t vnode;
-
-  if(!(vnode=kernel_get_root_vnode())) {
-    puts("[elfldr.elf] kernel_get_root_vnode() failed");
-    return -1;
-  }
-  if(kernel_set_proc_rootdir(pid, vnode)) {
-    puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
-    return -1;
-  }
-  if(kernel_set_ucred_uid(pid, 0)) {
-    puts("[elfldr.elf] kernel_set_ucred_uid() failed");
-    return -1;
-  }
-
-  if(kernel_set_ucred_caps(pid, caps)) {
-    puts("[elfldr.elf] kernel_set_ucred_caps() failed");
-    return -1;
-  }
-
-  return 0;
-}
-
-
-int
-elfldr_exec(pid_t pid, uint8_t *elf) {
+elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
   intptr_t entry;
   intptr_t args;
   struct reg r;
@@ -429,58 +408,191 @@ elfldr_exec(pid_t pid, uint8_t *elf) {
 }
 
 
+/**
+ * Raise privileges of a process so it can allocate JIT memory and
+ * access the SceSpZeroConf eboot.
+ **/
+static int
+elfldr_raise_privileges(pid_t pid) {
+  uint8_t caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
+                      0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
+  intptr_t vnode;
+
+  if(!(vnode=kernel_get_root_vnode())) {
+    return -1;
+  }
+  if(kernel_set_proc_rootdir(pid, vnode)) {
+    return -1;
+  }
+  if(kernel_set_ucred_uid(pid, 0)) {
+    return -1;
+  }
+  if(kernel_set_ucred_caps(pid, caps)) {
+    return -1;
+  }
+
+  return 0;
+}
+
+
+/**
+ * Set the name of a process.
+ **/
 int
-elfldr_spawn(uint8_t *elf) {
-  uint8_t int3instr = 0xcc;
-  char* argv[] = {0, 0};
-  struct reg r = {0};
-  intptr_t brkpoint;
-  pid_t pid = -1;
+elfldr_set_procname(pid_t pid, const char* name) {
+  intptr_t buf;
 
-  // SceSpZeroConf
-  argv[0] = "/system/vsh/app/NPXS40112/eboot.bin";
-  if(sceKernelSpawn(&pid, 1, argv[0], NULL, argv)) {
-    perror("sceKernelSpawn");
-    pt_detach(pid);
+  if((buf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    pt_perror(pid, "[elfldr.elf] pt_mmap");
     return -1;
   }
 
-  if(!(brkpoint=kernel_dynlib_entry_addr(pid, 0))) {
-    puts("[elfldr.elf] kernel_dynlib_entry_addr() failed");
-    pt_detach(pid);
-    return -1;
-  }
+  mdbg_copyin(pid, name, buf, strlen(name)+1);
+  pt_syscall(pid, SYS_thr_set_name, -1, buf);
+  pt_munmap(pid, buf, PAGE_SIZE);
 
-  if(mdbg_copyin(pid, &int3instr, brkpoint, sizeof(int3instr))) {
-    perror("[elfldr.elf] mdbg_copyin");
-    pt_detach(pid);
-    return -1;
-  }
+  return 0;
+}
 
-  if(pt_continue(pid, SIGCONT)) {
-    perror("[elfldr.elf] pt_continue");
-    pt_detach(pid);
-    return -1;
-  }
 
-  if(waitpid(pid, 0, 0) == -1) {
-    perror("[elfldr.elf] waitpid");
-    pt_detach(pid);
-    return -1;
-  }
-
+/**
+ * Execute an ELF inside the process with the given pid.
+ **/
+int
+elfldr_exec(pid_t pid, uint8_t* elf) {
   if(elfldr_raise_privileges(pid)) {
     puts("[elfldr.elf] Unable to raise privileges");
+    kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
-  
-  if(elfldr_exec(pid, elf)) {
-    pt_setregs(pid, &r);
+
+  if(elfldr_prepare_exec(pid, elf)) {
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
   }
 
   if(pt_detach(pid)) {
     perror("[elfldr.elf] pt_detach");
+    kill(pid, SIGKILL);
+    return -1;
+  }
+
+  return 0;
+}
+
+
+/**
+ * Execute an ELF inside a new process.
+ **/
+pid_t
+elfldr_spawn(uint8_t* elf) {
+  char* argv[] = {"homebrew", 0};
+  uint8_t int3instr = 0xcc;
+  struct kevent evt;
+  intptr_t brkpoint;
+  uint8_t orginstr;
+  pid_t pid = -1;
+  int kq;
+
+  if((kq=kqueue()) < 0) {
+    perror("kqueue");
+    return -1;
+  }
+
+  if((pid=syscall(SYS_rfork, RFPROC | RFCFDG)) < 0) {
+    perror("rfork");
+    return pid;
+  }
+
+  if(!pid) {
+    if(open("/dev/deci_stdin", O_RDONLY) < 0) {
+      _exit(errno);
+    }
+    if(open("/dev/deci_stdout", O_WRONLY) < 0) {
+      _exit(errno);
+    }
+    if(open("/dev/deci_stderr", O_WRONLY) < 0) {
+      _exit(errno);
+    }
+
+    if(syscall(SYS_ptrace, PT_TRACE_ME, 0, 0, 0) < 0) {
+      perror("ptrace");
+      _exit(errno);
+    }
+
+    if(execve(SceSpZeroConf, argv, 0) < 0) {
+      perror("execve");
+      _exit(errno);
+    }
+    _exit(-1);
+  }
+
+  EV_SET(&evt, pid, EVFILT_PROC, EV_ADD, NOTE_EXEC | NOTE_EXIT, 0, NULL);
+  if(kevent(kq, &evt, 1, &evt, 1, NULL) < 0) {
+    perror("kevent");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    close(kq);
+    return -1;
+  }
+
+  close(kq);
+  if(waitpid(pid, 0, 0) < 0) {
+    perror("waitpid");
+    pt_continue(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // The proc is now in the STOP state, with the instruction pointer pointing at
+  // the libkernel entry. Insert a breakpoint at the eboot entry.
+  if(!(brkpoint=kernel_dynlib_entry_addr(pid, 0))) {
+    puts("[elfldr.elf] kernel_dynlib_entry_addr() failed");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+  if(mdbg_copyout(pid, brkpoint, &orginstr, sizeof(orginstr))) {
+    perror("[elfldr.elf] mdbg_copyout");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+  if(mdbg_copyin(pid, &int3instr, brkpoint, sizeof(int3instr))) {
+    perror("[elfldr.elf] mdbg_copyin");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // Continue execution until we hit the breakpoint, then remove it.
+  if(pt_continue(pid, SIGCONT)) {
+    perror("[elfldr.elf] pt_continue");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+  if(waitpid(pid, 0, 0) == -1) {
+    perror("[elfldr.elf] waitpid");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+  if(mdbg_copyin(pid, &orginstr, brkpoint, sizeof(orginstr))) {
+    perror("[elfldr.elf] mdbg_copyin");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // Execute the ELF
+  elfldr_set_procname(pid, "homebrew");
+  if(elfldr_exec(pid, elf)) {
+    kill(pid, SIGKILL);
+    pt_detach(pid);
     return -1;
   }
 
@@ -488,6 +600,9 @@ elfldr_spawn(uint8_t *elf) {
 }
 
 
+/**
+ * Fint the pid of a process with the given name.
+ **/
 pid_t
 elfldr_find_pid(const char* name) {
   int mib[4] = {1, 14, 8, 0};

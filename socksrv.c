@@ -28,6 +28,7 @@ along with this program; see the file COPYING. If not, see
 
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/sysctl.h>
 #include <sys/wait.h>
 
 #include <ps5/kernel.h>
@@ -40,39 +41,6 @@ along with this program; see the file COPYING. If not, see
  * Name of the process.
  **/
 #define PROCNAME "elfldr.elf"
-
-
-/**
- * Data structure used to send UI notifications on the PS5.
- **/
-typedef struct notify_request {
-  char useless1[45];
-  char message[3075];
-} notify_request_t;
-
-
-/**
- * Send a UI notification request.
- **/
-int sceKernelSendNotificationRequest(int, notify_request_t*, size_t, int);
-
-
-/**
- * Send a notification to the UI and stdout.
- **/
-static void
-notify(const char *fmt, ...) {
-  notify_request_t req;
-  va_list args;
-
-  bzero(&req, sizeof req);
-  va_start(args, fmt);
-  vsnprintf(req.message, sizeof req.message, fmt, args);
-  va_end(args);
-
-  sceKernelSendNotificationRequest(0, &req, sizeof req, 0);
-  printf("[%s] %s\n", PROCNAME, req.message);
-}
 
 
 /**
@@ -103,46 +71,32 @@ readsock(int fd) {
 
 
 /**
- *
+ * Process connections in induvidual threads.
  **/
 static void*
 serve_thread(void* args) {
   int fd = (int)(long)args;
   uint8_t* elf;
-  int status;
-  pid_t pid;
 
   if(!(elf=readsock(fd))) {
     close(fd);
     return 0;
   }
 
-  if(memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
-    close(fd);
-    free(elf);
-    return 0;
-  }
-
-  if((pid=elfldr_spawn(elf)) < 0) {
-    close(fd);
-    free(elf);
-    return 0;
+  // Check for the ELF magic header
+  if(!memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
+    elfldr_spawn(elf);
   }
 
   free(elf);
-
-  waitpid(pid, &status,  WTRAPPED | WUNTRACED);
-  if(WIFSTOPPED(status)) {
-    printf("PID %d received the fatal POSIX signal %d\n", pid, WSTOPSIG(status));
-    pt_continue(pid, SIGKILL);
-  }
+  close(fd);
 
   return 0;
 }
 
 
 /**
- *
+ * Serve ELF loader via a socket.
  **/
 static int
 serve_elfldr(uint16_t port) {
@@ -171,7 +125,7 @@ serve_elfldr(uint16_t port) {
       continue;
     }
 
-    // skip localhost
+    // Skip localhost
     if(!strncmp("lo", ifa->ifa_name, 2)) {
       continue;
     }
@@ -179,13 +133,13 @@ serve_elfldr(uint16_t port) {
     struct sockaddr_in *in = (struct sockaddr_in*)ifa->ifa_addr;
     inet_ntop(AF_INET, &(in->sin_addr), ip, sizeof(ip));
 
-    // skip interfaces without an ip
+    // Skip interfaces without an IP
     if(!strncmp("0.", ip, 2)) {
       continue;
     }
     ifaddr_wait = 0;
 
-    notify("Serving ELF loader on %s:%d (%s)", ip, port, ifa->ifa_name);
+    printf("[elfldr.elf] Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
   }
 
   freeifaddrs(ifaddr);
@@ -232,16 +186,42 @@ serve_elfldr(uint16_t port) {
 }
 
 
+/**
+ * Initialize stdout and stderr to /dev/console.
+ **/
+static void
+init_stdio(void) {
+  int fd = open("/dev/console", O_WRONLY);
+
+  close(STDERR_FILENO);
+  close(STDOUT_FILENO);
+
+  dup2(fd, STDOUT_FILENO);
+  dup2(fd, STDERR_FILENO);
+
+  close(fd);
+}
+
+
+/**
+ *
+ **/
 int main() {
   const int port = 9021;
   pid_t pid;
 
+  // We are running inside SceRedisServer, fork the process
   signal(SIGCHLD, SIG_IGN);
   if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
-    return pid;
+    return 0;
   }
 
+  init_stdio();
+  syscall(SYS_setsid);
   signal(SIGCHLD, SIG_IGN);
+  printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
+
+  // Kill existing instances of the ELF loader.
   while((pid=elfldr_find_pid(PROCNAME)) > 0) {
     if(kill(pid, SIGKILL)) {
       perror("[elfldr.elf] kill");
@@ -249,10 +229,7 @@ int main() {
     sleep(1);
   }
 
-  syscall(SYS_setsid);
   syscall(SYS_thr_set_name, -1, PROCNAME);
-  dup2(open("/dev/console", O_WRONLY), STDOUT_FILENO);
-  dup2(open("/dev/console", O_WRONLY), STDERR_FILENO);
   kernel_set_proc_rootdir(getpid(), kernel_get_root_vnode());
 
   while(1) {

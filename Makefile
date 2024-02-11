@@ -25,26 +25,28 @@ CC := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-cc
 LD := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-ld
 
 CFLAGS := -g -Wall -Werror
+LDADD  := -lkernel_web -lSceLibcInternal
 
 all: bootstrap.elf
 
-elfldr.elf: main.o pt.o elfldr.o
-	$(LD) $^ -lSceLibcInternal -lkernel_sys -o $@
+socksrv_elf.c: socksrv.elf
 
-bootstrap.elf: bootstrap.o pt.o elfldr.o
-	$(LD) $^ -lSceLibcInternal -lkernel_web -o $@
-
-bootstrap.o: bootstrap.c elfldr_elf.c
-	$(CC) -c $(CFLAGS) -o $@ $<
-
-elfldr_elf.c: elfldr.elf
-	xxd -i $^ > $@
+bootstrap.o: socksrv_elf.c
 
 %.o: %.c
-	$(CC) -c $(CFLAGS) -o $@ $^
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+bootstrap.elf: bootstrap.o elfldr.o pt.o
+	$(LD) $^ $(LDADD) -o $@
+
+socksrv.elf: socksrv.o elfldr.o pt.o
+	$(LD) $^ $(LDADD) -o $@
+
+socksrv_elf.c: socksrv.elf
+	xxd -i $^ > $@
 
 clean:
-	rm -f *.o bootstrap.elf elfldr.elf elfldr_elf.c
+	rm -f socksrv_elf.c *.o *.elf
 
 test: bootstrap.elf
 	nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
