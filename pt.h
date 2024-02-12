@@ -45,8 +45,11 @@ int pt_mprotect(pid_t pid, intptr_t addr, size_t len, int prot);
 int pt_socket(pid_t pid, int domain, int type, int protocol);
 int pt_setsockopt(pid_t pid, int fd, int level, int optname, intptr_t optval,
 		  uint32_t optlen);
+int pt_bind(pid_t pid, int sockfd, intptr_t addr, uint32_t addrlen) ;
+ssize_t pt_recvmsg(pid_t pid, int fd, intptr_t msg, int flags);
 
 int pt_close(pid_t pid, int fd);
 
+int pt_dup2(pid_t pid, int oldfd, int newfd);
 int pt_pipe(pid_t pid, intptr_t pipefd);
 void pt_perror(pid_t pid, const char *s);

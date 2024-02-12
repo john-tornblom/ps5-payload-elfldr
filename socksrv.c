@@ -73,25 +73,20 @@ readsock(int fd) {
 /**
  * Process connections in induvidual threads.
  **/
-static void*
-serve_thread(void* args) {
-  int fd = (int)(long)args;
+static void
+on_connection(int fd) {
   uint8_t* elf;
 
   if(!(elf=readsock(fd))) {
-    close(fd);
-    return 0;
+    return;
   }
 
   // Check for the ELF magic header
   if(!memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
-    elfldr_spawn(elf);
+    elfldr_spawn(fd, elf);
   }
 
   free(elf);
-  close(fd);
-
-  return 0;
 }
 
 
@@ -106,7 +101,6 @@ serve_elfldr(uint16_t port) {
   struct ifaddrs *ifaddr;
   int ifaddr_wait = 1;
   socklen_t socklen;
-  pthread_t trd;
   int connfd;
   int srvfd;
 
@@ -179,7 +173,9 @@ serve_elfldr(uint16_t port) {
       perror("[elfldr.elf] accept");
       break;
     }
-    pthread_create(&trd, NULL, serve_thread, (void*)(long)connfd);
+
+    on_connection(connfd);
+    close(connfd);
   }
 
   return close(srvfd);

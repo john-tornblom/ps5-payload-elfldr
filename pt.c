@@ -295,6 +295,24 @@ pt_close(pid_t pid, int fd) {
 
 
 int
+pt_bind(pid_t pid, int sockfd, intptr_t addr, uint32_t addrlen) {
+  return (int)pt_syscall(pid, SYS_bind, sockfd, addr, addrlen);
+}
+
+
+ssize_t
+pt_recvmsg(pid_t pid, int fd, intptr_t msg, int flags) {
+  return (int)pt_syscall(pid, SYS_recvmsg, fd, msg, flags);
+}
+
+
+int
+pt_dup2(pid_t pid, int oldfd, int newfd) {
+  return (int)pt_syscall(pid, SYS_dup2, oldfd, newfd);
+}
+
+
+int
 pt_pipe(pid_t pid, intptr_t pipefd) {
   intptr_t faddr = pt_resolve(pid, "-Jp7F+pXxNg");
   return (int)pt_call(pid, faddr, pipefd);

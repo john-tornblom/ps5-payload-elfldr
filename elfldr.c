@@ -28,6 +28,7 @@ along with this program; see the file COPYING. If not, see
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
+#include <sys/un.h>
 #include <sys/user.h>
 #include <sys/wait.h>
 
@@ -287,6 +288,126 @@ elfldr_load(pid_t pid, uint8_t *elf) {
 
 
 /**
+ * Send a file descriptor to a process that listens on a UNIX domain socket
+ * with the given socket path.
+ **/
+static int
+elfldr_sendfd(const char *sockpath, int fd) {
+  struct sockaddr_un addr = {0};
+  struct msghdr msg = {0};
+  struct cmsghdr *cmsg;
+  uint8_t buf[24];
+  int sockfd;
+
+  addr.sun_family = AF_UNIX;
+  strcpy(addr.sun_path, sockpath);
+
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_name = &addr;
+  msg.msg_namelen = sizeof(struct sockaddr_un);
+  msg.msg_control = buf;
+  msg.msg_controllen = sizeof(buf);
+
+  memset(buf, 0, sizeof(buf));
+  cmsg = (struct cmsghdr *)buf;
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type  = SCM_RIGHTS;
+  cmsg->cmsg_len   = 20;
+  *((int *)&buf[16]) = fd;
+
+  if((sockfd=socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+    perror("[elfldr.elf] socket");
+    return -1;
+  }
+
+  if(sendmsg(sockfd, &msg, 0) < 0) {
+    perror("[elfldr.elf] sendmsg");
+    close(sockfd);
+    return -1;
+  }
+
+  return close(sockfd);
+}
+
+
+/**
+ * Pipe stdout of a process with the given pid to a file descriptor, where
+ * communication is done via a UNIX domain socket of the given socket path.
+ **/
+static int
+elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
+  struct sockaddr_un addr = {0};
+  intptr_t ptbuf;
+  int sockfd;
+
+  if((ptbuf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    pt_perror(pid, "[elfldr.elf] pt_mmap");
+    return -1;
+  }
+
+  if((sockfd=pt_socket(pid, AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+    pt_perror(pid, "[elfldr.elf] pt_socket");
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    return -1;
+  }
+
+  addr.sun_family = AF_UNIX;
+  strcpy(addr.sun_path, sockpath);
+  mdbg_copyin(pid, &addr, ptbuf, sizeof(addr));
+  if(pt_bind(pid, sockfd, ptbuf, sizeof(addr))) {
+    pt_perror(pid, "[elfldr.elf] pt_bind");
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if(elfldr_sendfd(sockpath, fd)) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  intptr_t hdr = ptbuf;
+  intptr_t iov = ptbuf + 0x100;
+  intptr_t control = ptbuf + 0x200;
+
+  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_name), 0);
+  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_namelen), 0);
+  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_iov), iov);
+  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_iovlen), 1);
+  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_control), control);
+  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_controllen), 24);
+  if(pt_recvmsg(pid, sockfd, hdr, 0) < 0) {
+    pt_perror(pid, "[elfldr.elf] pt_recvmsg");
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if((fd=pt_getint(pid, control+16)) < 0) {
+    pt_munmap(pid, ptbuf, PAGE_SIZE);
+    pt_close(pid, sockfd);
+    return -1;
+  }
+
+  if(pt_munmap(pid, ptbuf, PAGE_SIZE)) {
+    pt_perror(pid, "[elfldr.elf] pt_munmap");
+    pt_close(pid, sockfd);
+    pt_close(pid, fd);
+  }
+
+  if(pt_close(pid, sockfd)) {
+    pt_perror(pid, "[elfldr.elf] pt_close");
+    pt_close(pid, fd);
+    return -1;
+  }
+
+  return fd;
+}
+
+
+/**
  * Create payload args in the address space of the process with the given pid.
  **/
 static intptr_t
@@ -460,12 +581,34 @@ elfldr_set_procname(pid_t pid, const char* name) {
  * Execute an ELF inside the process with the given pid.
  **/
 int
-elfldr_exec(pid_t pid, uint8_t* elf) {
+elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
+  char path[PATH_MAX];
+
   if(elfldr_raise_privileges(pid)) {
     puts("[elfldr.elf] Unable to raise privileges");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
+  }
+
+  if(stdio > 0) {
+    sprintf(path, "/system_tmp/elfldr.%d.sock", pid);
+    stdio = elfldr_stdout(pid, path, stdio);
+    unlink(path);
+
+    if(stdio < 0) {
+      puts("[elfldr.elf] elfldr_stdout() failed");
+      kill(pid, SIGKILL);
+      pt_detach(pid);
+      return -1;
+    }
+
+    pt_close(pid, STDERR_FILENO);
+    pt_close(pid, STDOUT_FILENO);
+
+    pt_dup2(pid, stdio, STDOUT_FILENO);
+    pt_dup2(pid, stdio, STDERR_FILENO);
+    pt_close(pid, stdio);
   }
 
   if(elfldr_prepare_exec(pid, elf)) {
@@ -488,7 +631,7 @@ elfldr_exec(pid_t pid, uint8_t* elf) {
  * Execute an ELF inside a new process.
  **/
 pid_t
-elfldr_spawn(uint8_t* elf) {
+elfldr_spawn(int stdio, uint8_t* elf) {
   char* argv[] = {"homebrew", 0};
   uint8_t int3instr = 0xcc;
   struct kevent evt;
@@ -556,6 +699,7 @@ elfldr_spawn(uint8_t* elf) {
     pt_detach(pid);
     return -1;
   }
+
   if(mdbg_copyout(pid, brkpoint, &orginstr, sizeof(orginstr))) {
     perror("[elfldr.elf] mdbg_copyout");
     kill(pid, SIGKILL);
@@ -591,7 +735,7 @@ elfldr_spawn(uint8_t* elf) {
 
   // Execute the ELF
   elfldr_set_procname(pid, "homebrew");
-  if(elfldr_exec(pid, elf)) {
+  if(elfldr_exec(pid, stdio, elf)) {
     perror("[elfldr.elf] pt_detach");
     kill(pid, SIGKILL);
     pt_detach(pid);
@@ -624,6 +768,7 @@ elfldr_find_pid(const char* name) {
 
   if(sysctl(mib, 4, buf, &buf_size, 0, 0)) {
     perror("[elfldr.elf] sysctl");
+    free(buf);
     return -1;
   }
 

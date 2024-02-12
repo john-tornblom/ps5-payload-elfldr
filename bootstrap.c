@@ -65,7 +65,7 @@ main() {
     return -1;
   }
 
-  ret = elfldr_exec(pid, socksrv_elf);
+  ret = elfldr_exec(pid, -1, socksrv_elf);
 
   // restore privileges
   if(kernel_set_proc_rootdir(pid, vnode)) {
