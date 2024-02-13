@@ -641,12 +641,12 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   int kq;
 
   if((kq=kqueue()) < 0) {
-    perror("kqueue");
+    perror("[elfldr.elf] kqueue");
     return -1;
   }
 
   if((pid=syscall(SYS_rfork, RFPROC | RFCFDG)) < 0) {
-    perror("rfork");
+    perror("[elfldr.elf] rfork");
     close(kq);
     return pid;
   }
@@ -663,12 +663,12 @@ elfldr_spawn(int stdio, uint8_t* elf) {
     }
 
     if(syscall(SYS_ptrace, PT_TRACE_ME, 0, 0, 0) < 0) {
-      perror("ptrace");
+      perror("[elfldr.elf] ptrace");
       _exit(errno);
     }
 
     if(execve(SceSpZeroConf, argv, 0) < 0) {
-      perror("execve");
+      perror("[elfldr.elf] execve");
       _exit(errno);
     }
     _exit(-1);
@@ -676,7 +676,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
 
   EV_SET(&evt, pid, EVFILT_PROC, EV_ADD, NOTE_EXEC | NOTE_EXIT, 0, NULL);
   if(kevent(kq, &evt, 1, &evt, 1, NULL) < 0) {
-    perror("kevent");
+    perror("[elfldr.elf] kevent");
     kill(pid, SIGKILL);
     pt_detach(pid);
     close(kq);
@@ -685,7 +685,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
 
   close(kq);
   if(waitpid(pid, 0, 0) < 0) {
-    perror("waitpid");
+    perror("[elfldr.elf] waitpid");
     pt_continue(pid, SIGKILL);
     pt_detach(pid);
     return -1;
