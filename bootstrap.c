@@ -31,6 +31,7 @@ int
 main() {
   uint8_t qa_flags[16];
   uint8_t caps[16];
+  uint64_t authid;
   intptr_t vnode;
   pid_t pid;
   int ret;
@@ -59,6 +60,10 @@ main() {
     puts("[elfldr.elf] kernel_get_ucred_caps() failed");
     return -1;
   }
+  if(!(authid=kernel_get_ucred_authid(pid))) {
+    puts("[elfldr.elf] kernel_get_ucred_authid() failed");
+    return -1;
+  }
 
   if(pt_attach(pid)) {
     perror("[elfldr.elf] pt_attach");
@@ -74,6 +79,10 @@ main() {
   }
   if(kernel_set_ucred_caps(pid, caps)) {
     puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    return -1;
+  }
+  if(kernel_set_ucred_authid(pid, authid)) {
+    puts("[elfldr.elf] kernel_set_ucred_authid() failed");
     return -1;
   }
 
