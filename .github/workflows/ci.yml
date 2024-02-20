@@ -48,6 +48,6 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: Payload
-        path: ./bootstrap.elf
+        path: ./elfldr.elf
         if-no-files-found: error
 
