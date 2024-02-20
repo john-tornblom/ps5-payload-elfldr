@@ -28,6 +28,7 @@ along with this program; see the file COPYING. If not, see
 
 #include <ps5/kernel.h>
 
+#include "klog.h"
 #include "pt.h"
 
 
@@ -263,6 +264,12 @@ pt_mmap(pid_t pid, intptr_t addr, size_t len, int prot, int flags,
 
 
 int
+pt_msync(pid_t pid, intptr_t addr, size_t len, int flags) {
+  return pt_syscall(pid, SYS_msync, addr, len, flags);
+}
+
+
+int
 pt_munmap(pid_t pid, intptr_t addr, size_t len) {
   return pt_syscall(pid, SYS_munmap, addr, len);
 }
@@ -313,6 +320,12 @@ pt_dup2(pid_t pid, int oldfd, int newfd) {
 
 
 int
+pt_rdup(pid_t pid, pid_t other_pid, int fd) {
+  return (int)pt_syscall(pid, 0x25b, other_pid, fd);
+}
+
+
+int
 pt_pipe(pid_t pid, intptr_t pipefd) {
   intptr_t faddr = pt_resolve(pid, "-Jp7F+pXxNg");
   return (int)pt_call(pid, faddr, pipefd);
@@ -329,5 +342,5 @@ pt_perror(pid_t pid, const char *s) {
   strcpy(buf, s);
   strcat(buf, ": ");
   strcat(buf, strerror(err));
-  puts(buf);
+  klog_puts(buf);
 }

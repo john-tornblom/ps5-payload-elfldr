@@ -39,6 +39,7 @@ int pt_jitshm_alias(pid_t pid, int fd, int flags);
 
 intptr_t pt_mmap(pid_t pid, intptr_t addr, size_t len, int prot, int flags,
 		 int fd, off_t off);
+int pt_msync(pid_t, intptr_t addr, size_t len, int flags);
 int pt_munmap(pid_t pid, intptr_t addr, size_t len);
 int pt_mprotect(pid_t pid, intptr_t addr, size_t len, int prot);
 
@@ -51,5 +52,6 @@ ssize_t pt_recvmsg(pid_t pid, int fd, intptr_t msg, int flags);
 int pt_close(pid_t pid, int fd);
 
 int pt_dup2(pid_t pid, int oldfd, int newfd);
+int pt_rdup(pid_t pid, pid_t other_pid, int fd);
 int pt_pipe(pid_t pid, intptr_t pipefd);
 void pt_perror(pid_t pid, const char *s);

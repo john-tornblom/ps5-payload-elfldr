@@ -34,13 +34,9 @@ along with this program; see the file COPYING. If not, see
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
+#include "klog.h"
 #include "pt.h"
 
-
-/**
- * Name of the process.
- **/
-#define PROCNAME "elfldr.elf"
 
 
 /**
@@ -56,7 +52,7 @@ readsock(int fd) {
   while((len=read(fd, buf, sizeof(buf)))) {
     data = realloc(data, offset + len + 1);
     if(data == 0) {
-      perror("[elfldr.elf] realloc");
+      klog_perror("[elfldr.elf] realloc");
       return 0;
     }
 
@@ -105,7 +101,7 @@ serve_elfldr(uint16_t port) {
   int srvfd;
 
   if(getifaddrs(&ifaddr) == -1) {
-    perror("[elfldr.elf] getifaddrs");
+    klog_perror("[elfldr.elf] getifaddrs");
     return -1;
   }
 
@@ -133,7 +129,7 @@ serve_elfldr(uint16_t port) {
     }
     ifaddr_wait = 0;
 
-    printf("[elfldr.elf] Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
+    klog_printf("[elfldr.elf] Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
   }
 
   freeifaddrs(ifaddr);
@@ -143,12 +139,12 @@ serve_elfldr(uint16_t port) {
   }
 
   if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    perror("[elfldr.elf] socket");
+    klog_perror("[elfldr.elf] socket");
     return -1;
   }
 
   if(setsockopt(srvfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
-    perror("[elfldr.elf] setsockopt");
+    klog_perror("[elfldr.elf] setsockopt");
     return -1;
   }
 
@@ -158,19 +154,19 @@ serve_elfldr(uint16_t port) {
   srvaddr.sin_port = htons(port);
 
   if(bind(srvfd, (struct sockaddr*)&srvaddr, sizeof(srvaddr)) != 0) {
-    perror("[elfldr.elf] bind");
+    klog_perror("[elfldr.elf] bind");
     return -1;
   }
 
   if(listen(srvfd, 5) != 0) {
-    perror("[elfldr.elf] listen");
+    klog_perror("[elfldr.elf] listen");
     return -1;
   }
 
   while(1) {
     socklen = sizeof(cliaddr);
     if((connfd=accept(srvfd, (struct sockaddr*)&cliaddr, &socklen)) < 0) {
-      perror("[elfldr.elf] accept");
+      klog_perror("[elfldr.elf] accept");
       break;
     }
 
@@ -183,50 +179,15 @@ serve_elfldr(uint16_t port) {
 
 
 /**
- * Initialize stdout and stderr to /dev/console.
- **/
-static void
-init_stdio(void) {
-  int fd = open("/dev/console", O_WRONLY);
-
-  close(STDERR_FILENO);
-  close(STDOUT_FILENO);
-
-  dup2(fd, STDOUT_FILENO);
-  dup2(fd, STDERR_FILENO);
-
-  close(fd);
-}
-
-
-/**
  *
  **/
 int main() {
   const int port = 9021;
-  pid_t pid;
 
-  // We are running inside SceRedisServer, fork the process
   signal(SIGCHLD, SIG_IGN);
-  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
-    return 0;
-  }
+  syscall(SYS_thr_set_name, -1, "elfldr(socksrv)");
 
-  init_stdio();
-  syscall(SYS_setsid);
-  signal(SIGCHLD, SIG_IGN);
-  printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
-
-  // Kill existing instances of the ELF loader.
-  while((pid=elfldr_find_pid(PROCNAME)) > 0) {
-    if(kill(pid, SIGKILL)) {
-      perror("[elfldr.elf] kill");
-    }
-    sleep(1);
-  }
-
-  syscall(SYS_thr_set_name, -1, PROCNAME);
-  kernel_set_proc_rootdir(getpid(), kernel_get_root_vnode());
+  klog_printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
 
   while(1) {
     serve_elfldr(port);

@@ -14,78 +14,76 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
+#include <signal.h>
 #include <stdio.h>
+
+#include <sys/syscall.h>
+#include <sys/wait.h>
 
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
+#include "klog.h"
 #include "pt.h"
-
 #include "socksrv_elf.c"
 
 
 /**
- * Attach to SceRedisServer and run socksrv.elf.
+ * Wait for a child process to terminate.
+ **/
+static int
+waitpid_nohang(pid_t pid) {
+  pid_t res;
+
+  while(1) {
+    if((res=waitpid(pid, 0, WNOHANG)) < 0) {
+      return -1;
+    } else if(!res) {
+      sleep(1);
+      continue;
+    } else {
+      return -1;
+    }
+  }
+}
+
+
+/**
+ * We are running inside SceRedisServer, fork and detach from it.
  **/
 int
 main() {
-  uint8_t qa_flags[16];
-  uint8_t caps[16];
-  uint64_t authid;
-  intptr_t vnode;
   pid_t pid;
-  int ret;
 
-  if(kernel_get_qaflags(qa_flags)) {
-    puts("[elfldr.elf] kernel_get_qa_flags() failed");
-    return -1;
-  }
-  qa_flags[1] |= 0x03; // Enable debugging with ptrace
-  if(kernel_set_qaflags(qa_flags)) {
-    puts("[elfldr.elf] kernel_set_qa_flags() failed");
-    return -1;
+  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
+    return pid;
   }
 
-  if((pid=elfldr_find_pid("SceRedisServer")) < 0) {
-    puts("[elfldr.elf] elfldr_find_pid() failed");
-    return -1;
+  while((pid=elfldr_find_pid("elfldr(bootstrap)")) > 0) {
+    if(kill(pid, SIGKILL)) {
+      klog_perror("kill");
+      _exit(-1);
+    }
+    sleep(1);
   }
 
-  // backup privileges
-  if(!(vnode=kernel_get_proc_rootdir(pid))) {
-    puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
-    return -1;
-  }
-  if(kernel_get_ucred_caps(pid, caps)) {
-    puts("[elfldr.elf] kernel_get_ucred_caps() failed");
-    return -1;
-  }
-  if(!(authid=kernel_get_ucred_authid(pid))) {
-    puts("[elfldr.elf] kernel_get_ucred_authid() failed");
-    return -1;
+  while((pid=elfldr_find_pid("elfldr(socksrv)")) > 0) {
+    if(kill(pid, SIGKILL)) {
+      klog_perror("kill");
+      _exit(-1);
+    }
+    sleep(1);
   }
 
-  if(pt_attach(pid)) {
-    perror("[elfldr.elf] pt_attach");
-    return -1;
+  syscall(SYS_thr_set_name, -1, "elfldr(bootstrap)");
+  while(1) {
+    if((pid=elfldr_spawn(-1, socksrv_elf)) < 0) {
+      _exit(-1);
+    }
+
+    waitpid_nohang(pid);
+    sleep(3);
   }
 
-  ret = elfldr_exec(pid, -1, socksrv_elf);
-
-  // restore privileges
-  if(kernel_set_proc_rootdir(pid, vnode)) {
-    puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
-    return -1;
-  }
-  if(kernel_set_ucred_caps(pid, caps)) {
-    puts("[elfldr.elf] kernel_set_ucred_caps() failed");
-    return -1;
-  }
-  if(kernel_set_ucred_authid(pid, authid)) {
-    puts("[elfldr.elf] kernel_set_ucred_authid() failed");
-    return -1;
-  }
-
-  return ret;
+  return 0;
 }
-

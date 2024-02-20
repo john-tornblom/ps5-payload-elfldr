@@ -28,6 +28,7 @@ along with this program; see the file COPYING. If not, see
 #include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/sysctl.h>
+
 #include <sys/un.h>
 #include <sys/user.h>
 #include <sys/wait.h>
@@ -36,6 +37,7 @@ along with this program; see the file COPYING. If not, see
 #include <ps5/mdbg.h>
 
 #include "elfldr.h"
+#include "klog.h"
 #include "pt.h"
 
 
@@ -122,7 +124,7 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   int error = 0;
 
   if(!(data=malloc(memsz))) {
-    perror("[elfldr.elf] malloc");
+    klog_perror("[elfldr.elf] malloc");
     return -1;
   }
 
@@ -167,6 +169,7 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
       pt_perror(ctx->pid, "[elfldr.elf] mdbg_copyin");
       error = -1;
     }
+    pt_msync(ctx->pid, addr, memsz, MS_SYNC);
     pt_munmap(ctx->pid, addr, memsz);
   }
 
@@ -197,7 +200,7 @@ elfldr_load(pid_t pid, uint8_t *elf) {
   // Sanity check, we only support 64bit ELFs.
   if(ehdr->e_ident[0] != 0x7f || ehdr->e_ident[1] != 'E' ||
      ehdr->e_ident[2] != 'L'  || ehdr->e_ident[3] != 'F') {
-    puts("[elfldr.elf] elfldr_load: Malformed ELF file");
+    klog_puts("[elfldr.elf] elfldr_load: Malformed ELF file");
     return 0;
   }
 
@@ -278,6 +281,11 @@ elfldr_load(pid_t pid, uint8_t *elf) {
     }
   }
 
+  if(pt_msync(pid, ctx.base_addr, ctx.base_size, MS_SYNC)) {
+    pt_perror(pid, "[elfldr.elf] pt_msync");
+    error = 1;
+  }
+
   if(error) {
     pt_munmap(pid, ctx.base_addr, ctx.base_size);
     return 0;
@@ -287,124 +295,6 @@ elfldr_load(pid_t pid, uint8_t *elf) {
 }
 
 
-/**
- * Send a file descriptor to a process that listens on a UNIX domain socket
- * with the given socket path.
- **/
-static int
-elfldr_sendfd(const char *sockpath, int fd) {
-  struct sockaddr_un addr = {0};
-  struct msghdr msg = {0};
-  struct cmsghdr *cmsg;
-  uint8_t buf[24];
-  int sockfd;
-
-  addr.sun_family = AF_UNIX;
-  strcpy(addr.sun_path, sockpath);
-
-  memset(&msg, 0, sizeof(msg));
-  msg.msg_name = &addr;
-  msg.msg_namelen = sizeof(struct sockaddr_un);
-  msg.msg_control = buf;
-  msg.msg_controllen = sizeof(buf);
-
-  memset(buf, 0, sizeof(buf));
-  cmsg = (struct cmsghdr *)buf;
-  cmsg->cmsg_level = SOL_SOCKET;
-  cmsg->cmsg_type  = SCM_RIGHTS;
-  cmsg->cmsg_len   = 20;
-  *((int *)&buf[16]) = fd;
-
-  if((sockfd=socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-    perror("[elfldr.elf] socket");
-    return -1;
-  }
-
-  if(sendmsg(sockfd, &msg, 0) < 0) {
-    perror("[elfldr.elf] sendmsg");
-    close(sockfd);
-    return -1;
-  }
-
-  return close(sockfd);
-}
-
-
-/**
- * Pipe stdout of a process with the given pid to a file descriptor, where
- * communication is done via a UNIX domain socket of the given socket path.
- **/
-static int
-elfldr_stdout(pid_t pid, const char *sockpath, int fd) {
-  struct sockaddr_un addr = {0};
-  intptr_t ptbuf;
-  int sockfd;
-
-  if((ptbuf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-		    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
-    pt_perror(pid, "[elfldr.elf] pt_mmap");
-    return -1;
-  }
-
-  if((sockfd=pt_socket(pid, AF_UNIX, SOCK_DGRAM, 0)) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_socket");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    return -1;
-  }
-
-  addr.sun_family = AF_UNIX;
-  strcpy(addr.sun_path, sockpath);
-  mdbg_copyin(pid, &addr, ptbuf, sizeof(addr));
-  if(pt_bind(pid, sockfd, ptbuf, sizeof(addr))) {
-    pt_perror(pid, "[elfldr.elf] pt_bind");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if(elfldr_sendfd(sockpath, fd)) {
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  intptr_t hdr = ptbuf;
-  intptr_t iov = ptbuf + 0x100;
-  intptr_t control = ptbuf + 0x200;
-
-  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_name), 0);
-  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_namelen), 0);
-  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_iov), iov);
-  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_iovlen), 1);
-  mdbg_setlong(pid, hdr + __builtin_offsetof(struct msghdr, msg_control), control);
-  mdbg_setint(pid, hdr + __builtin_offsetof(struct msghdr, msg_controllen), 24);
-  if(pt_recvmsg(pid, sockfd, hdr, 0) < 0) {
-    pt_perror(pid, "[elfldr.elf] pt_recvmsg");
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if((fd=pt_getint(pid, control+16)) < 0) {
-    pt_munmap(pid, ptbuf, PAGE_SIZE);
-    pt_close(pid, sockfd);
-    return -1;
-  }
-
-  if(pt_munmap(pid, ptbuf, PAGE_SIZE)) {
-    pt_perror(pid, "[elfldr.elf] pt_munmap");
-    pt_close(pid, sockfd);
-    pt_close(pid, fd);
-  }
-
-  if(pt_close(pid, sockfd)) {
-    pt_perror(pid, "[elfldr.elf] pt_close");
-    pt_close(pid, fd);
-    return -1;
-  }
-
-  return fd;
-}
 
 
 /**
@@ -500,17 +390,17 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
   struct reg r;
 
   if(pt_getregs(pid, &r)) {
-    perror("[elfldr.elf] pt_getregs");
+    klog_perror("[elfldr.elf] pt_getregs");
     return -1;
   }
 
   if(!(entry=elfldr_load(pid, elf))) {
-    puts("[elfldr.elf] elfldr_load() failed");
+    klog_puts("[elfldr.elf] elfldr_load() failed");
     return -1;
   }
 
   if(!(args=elfldr_payload_args(pid))) {
-    puts("[elfldr.elf] elfldr_payload_args() failed");
+    klog_puts("[elfldr.elf] elfldr_payload_args() failed");
     return -1;
   }
 
@@ -521,7 +411,7 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
   r.r_r10 = 0; // envp
 
   if(pt_setregs(pid, &r)) {
-    perror("[elfldr.elf] pt_setregs");
+    klog_perror("[elfldr.elf] pt_setregs");
     return -1;
   }
 
@@ -571,6 +461,7 @@ elfldr_set_procname(pid_t pid, const char* name) {
 
   mdbg_copyin(pid, name, buf, strlen(name)+1);
   pt_syscall(pid, SYS_thr_set_name, -1, buf);
+  pt_msync(pid, buf, PAGE_SIZE, MS_SYNC);
   pt_munmap(pid, buf, PAGE_SIZE);
 
   return 0;
@@ -582,35 +473,28 @@ elfldr_set_procname(pid_t pid, const char* name) {
  **/
 int
 elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
-  char path[PATH_MAX];
 
   if(elfldr_raise_privileges(pid)) {
-    puts("[elfldr.elf] Unable to raise privileges");
+    klog_puts("[elfldr.elf] Unable to raise privileges");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
 
   if(stdio > 0) {
-    sprintf(path, "/system_tmp/elfldr.%d.sock", pid);
-    stdio = elfldr_stdout(pid, path, stdio);
-    unlink(path);
-
-    if(stdio < 0) {
-      puts("[elfldr.elf] elfldr_stdout() failed");
-      kill(pid, SIGKILL);
-      pt_detach(pid);
-      return -1;
-    }
+    stdio = pt_rdup(pid, getpid(), stdio);
 
     pt_close(pid, STDERR_FILENO);
     pt_close(pid, STDOUT_FILENO);
+    pt_close(pid, STDIN_FILENO);
 
+    pt_dup2(pid, stdio, STDIN_FILENO);
     pt_dup2(pid, stdio, STDOUT_FILENO);
     pt_dup2(pid, stdio, STDERR_FILENO);
+
     pt_close(pid, stdio);
   }
-
+  
   if(elfldr_prepare_exec(pid, elf)) {
     kill(pid, SIGKILL);
     pt_detach(pid);
@@ -618,7 +502,7 @@ elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
   }
 
   if(pt_detach(pid)) {
-    perror("[elfldr.elf] pt_detach");
+    klog_perror("[elfldr.elf] pt_detach");
     kill(pid, SIGKILL);
     return -1;
   }
@@ -641,42 +525,45 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   int kq;
 
   if((kq=kqueue()) < 0) {
-    perror("[elfldr.elf] kqueue");
+    klog_perror("[elfldr.elf] kqueue");
     return -1;
   }
 
   if((pid=syscall(SYS_rfork, RFPROC | RFCFDG)) < 0) {
-    perror("[elfldr.elf] rfork");
+    klog_perror("[elfldr.elf] rfork");
     close(kq);
     return pid;
   }
 
   if(!pid) {
     if(open("/dev/deci_stdin", O_RDONLY) < 0) {
-      _exit(errno);
+      klog_perror("open");
+      _exit(-1);
     }
     if(open("/dev/deci_stdout", O_WRONLY) < 0) {
-      _exit(errno);
+      klog_perror("open");
+      _exit(-1);
     }
     if(open("/dev/deci_stderr", O_WRONLY) < 0) {
-      _exit(errno);
+      klog_perror("open");
+      _exit(-1);
     }
 
     if(syscall(SYS_ptrace, PT_TRACE_ME, 0, 0, 0) < 0) {
-      perror("[elfldr.elf] ptrace");
-      _exit(errno);
+      klog_perror("[elfldr.elf] ptrace");
+      _exit(-1);
     }
 
     if(execve(SceSpZeroConf, argv, 0) < 0) {
-      perror("[elfldr.elf] execve");
-      _exit(errno);
+      klog_perror("[elfldr.elf] execve");
+      _exit(-1);
     }
     _exit(-1);
   }
 
   EV_SET(&evt, pid, EVFILT_PROC, EV_ADD, NOTE_EXEC | NOTE_EXIT, 0, NULL);
   if(kevent(kq, &evt, 1, &evt, 1, NULL) < 0) {
-    perror("[elfldr.elf] kevent");
+    klog_perror("[elfldr.elf] kevent");
     kill(pid, SIGKILL);
     pt_detach(pid);
     close(kq);
@@ -685,7 +572,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
 
   close(kq);
   if(waitpid(pid, 0, 0) < 0) {
-    perror("[elfldr.elf] waitpid");
+    klog_perror("[elfldr.elf] waitpid");
     pt_continue(pid, SIGKILL);
     pt_detach(pid);
     return -1;
@@ -694,20 +581,20 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   // The proc is now in the STOP state, with the instruction pointer pointing at
   // the libkernel entry. Insert a breakpoint at the eboot entry.
   if(!(brkpoint=kernel_dynlib_entry_addr(pid, 0))) {
-    puts("[elfldr.elf] kernel_dynlib_entry_addr() failed");
+    klog_puts("[elfldr.elf] kernel_dynlib_entry_addr() failed");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
 
   if(mdbg_copyout(pid, brkpoint, &orginstr, sizeof(orginstr))) {
-    perror("[elfldr.elf] mdbg_copyout");
+    klog_perror("[elfldr.elf] mdbg_copyout");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
   if(mdbg_copyin(pid, &int3instr, brkpoint, sizeof(int3instr))) {
-    perror("[elfldr.elf] mdbg_copyin");
+    klog_perror("[elfldr.elf] mdbg_copyin");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
@@ -715,19 +602,19 @@ elfldr_spawn(int stdio, uint8_t* elf) {
 
   // Continue execution until we hit the breakpoint, then remove it.
   if(pt_continue(pid, SIGCONT)) {
-    perror("[elfldr.elf] pt_continue");
+    klog_perror("[elfldr.elf] pt_continue");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
   if(waitpid(pid, 0, 0) == -1) {
-    perror("[elfldr.elf] waitpid");
+    klog_perror("[elfldr.elf] waitpid");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
   if(mdbg_copyin(pid, &orginstr, brkpoint, sizeof(orginstr))) {
-    perror("[elfldr.elf] mdbg_copyin");
+    klog_perror("[elfldr.elf] mdbg_copyin");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
@@ -736,7 +623,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   // Execute the ELF
   elfldr_set_procname(pid, "homebrew");
   if(elfldr_exec(pid, stdio, elf)) {
-    perror("[elfldr.elf] pt_detach");
+    klog_perror("[elfldr.elf] pt_detach");
     kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
@@ -757,17 +644,17 @@ elfldr_find_pid(const char* name) {
   uint8_t *buf;
 
   if(sysctl(mib, 4, 0, &buf_size, 0, 0)) {
-    perror("[elfldr.elf] sysctl");
+    klog_perror("[elfldr.elf] sysctl");
     return -1;
   }
 
   if(!(buf=malloc(buf_size))) {
-    perror("[elfldr.elf] malloc");
+    klog_perror("[elfldr.elf] malloc");
     return -1;
   }
 
   if(sysctl(mib, 4, buf, &buf_size, 0, 0)) {
-    perror("[elfldr.elf] sysctl");
+    klog_perror("[elfldr.elf] sysctl");
     free(buf);
     return -1;
   }
