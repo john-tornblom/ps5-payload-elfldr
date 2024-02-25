@@ -2,11 +2,11 @@
 This is an ELF loader for PS5 systems that have been jailbroken using either the
 [BD-J ps5-payload-loader][bdj], or the [webkit approached from Specter][webkit].
 Unlike the ELF loaders bundled with those exploits, this one uses the ptrace
-syscall to bootstrap itself via the `SceRedisServer` process, and will continue
-running in the background even when playing games. Furthermore, this ELF loader
-will also resume its execution when the PS5 returns from rest mode. Payloads that
-are loaded are executed in induvidual processes, so if a payload crashes,
-the ELF loader will keep on running.
+syscall to bootstrap itself into the `SceSpZeroConf` process, and then will fork
+itself into a process that keeps running in the background, even when playing
+games. Furthermore, this ELF loader will also resume its execution when the PS5
+returns from rest mode. Payloads that are loaded are executed in induvidual
+processes, so if a payload crashes, the ELF loader will keep on running.
 
 ## Building
 Assuming you have the [ps5-payload-sdk][sdk] installed on a POSIX machine,
@@ -18,18 +18,19 @@ john@localhost:ps5-payload-elfldr$ make
 ```
 
 ## Usage
-To deploy the ELF loader itself, we first bootstrap via the ELF loader bundled
-with the exploit of your choice.
+To deploy the ELF loader itself, we first bootstrap via the one bundled with the
+exploit of your choice.
 ```console
-john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9020 < bootstrap.elf
+john@localhost:ps5-payload-elfldr$ export PS5_HOST=ps5
+john@localhost:ps5-payload-elfldr$ nc -q0 $PS5_HOST 9020 < elfldr.elf
 ```
 **Note**: recent versions of the [BD-J ps5-payload-loader][bdj] include a binary
 version of this ELF loader which can be launched directly from the menu system.
 
-Once the payload has been launched, a new socket server is started from the
-process that accepts ELFs on port 9021:
+Once the payload has been launched, a new socket server is started that accepts
+ELFs on port 9021:
 ```console
-john@localhost:ps5-payload-elfldr$ nc -q0 PS5_HOST 9021 < hello_world.elf
+john@localhost:ps5-payload-elfldr$ nc -q0 $PS5_HOST 9021 < hello_world.elf
 ```
 
 ## Reporting Bugs

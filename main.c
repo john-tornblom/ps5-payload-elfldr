@@ -24,7 +24,7 @@ along with this program; see the file COPYING. If not, see
 
 
 /**
- * We are running inside bdj.elf, attach to SceRedisServer and run bootstrap.elf
+ * We are running inside bdj.elf, attach to SceSpZeroConf and run bootstrap.elf.
  **/
 int
 main() {
@@ -61,7 +61,7 @@ main() {
     return -1;
   }
 
-  // launch bootstrap.elf inside SceRedisServer
+  // launch bootstrap.elf inside SceSpZeroConf
   if((vpid=elfldr_find_pid("SceSpZeroConf")) < 0) {
     klog_puts("[elfldr.elf] elfldr_find_pid() failed");
     return -1;

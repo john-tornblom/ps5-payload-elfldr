@@ -26,9 +26,8 @@ along with this program; see the file COPYING. If not, see
 #include "socksrv_elf.c"
 
 
-
 /**
- * We are running inside SceRedisServer, spawn socksrv.elf
+ * We are running inside SceSpZeroConf, spawn socksrv.elf.
  **/
 int
 main() {
