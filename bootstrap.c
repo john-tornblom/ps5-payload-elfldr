@@ -17,73 +17,63 @@ along with this program; see the file COPYING. If not, see
 #include <signal.h>
 #include <stdio.h>
 
-#include <sys/syscall.h>
-#include <sys/wait.h>
-
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
 #include "klog.h"
 #include "pt.h"
+
 #include "socksrv_elf.c"
 
 
-/**
- * Wait for a child process to terminate.
- **/
-static int
-waitpid_nohang(pid_t pid) {
-  pid_t res;
-
-  while(1) {
-    if((res=waitpid(pid, 0, WNOHANG)) < 0) {
-      return -1;
-    } else if(!res) {
-      sleep(1);
-      continue;
-    } else {
-      return -1;
-    }
-  }
-}
-
 
 /**
- * We are running inside SceRedisServer, fork and detach from it.
+ * We are running inside SceRedisServer, spawn socksrv.elf
  **/
 int
 main() {
-  pid_t pid;
+  pid_t mypid = getpid();
+  uint8_t caps[16];
+  uint64_t authid;
+  intptr_t vnode;
+  int ret;
 
-  if((pid=syscall(SYS_rfork, RFPROC | RFNOWAIT | RFFDG))) {
-    return pid;
+  // backup my privileges
+  if(!(vnode=kernel_get_proc_rootdir(mypid))) {
+    klog_puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
+    return -1;
+  }
+  if(kernel_get_ucred_caps(mypid, caps)) {
+    klog_puts("[elfldr.elf] kernel_get_ucred_caps() failed");
+    return -1;
+  }
+  if(!(authid=kernel_get_ucred_authid(mypid))) {
+    klog_puts("[elfldr.elf] kernel_get_ucred_authid() failed");
+    return -1;
   }
 
-  while((pid=elfldr_find_pid("elfldr(bootstrap)")) > 0) {
-    if(kill(pid, SIGKILL)) {
-      klog_perror("kill");
-      _exit(-1);
-    }
-    sleep(1);
+  // launch socksrv.elf in a new processes
+  if(elfldr_raise_privileges(mypid)) {
+    klog_puts("[elfldr.elf] Unable to raise privileges");
+    ret = -1;
+  } else {
+    signal(SIGCHLD, SIG_IGN);
+    ret = elfldr_spawn(-1, socksrv_elf);
   }
 
-  while((pid=elfldr_find_pid("elfldr(socksrv)")) > 0) {
-    if(kill(pid, SIGKILL)) {
-      klog_perror("kill");
-      _exit(-1);
-    }
-    sleep(1);
+  // restore my privileges
+  if(kernel_set_proc_rootdir(mypid, vnode)) {
+    klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
+    ret = -1;
+  }
+  if(kernel_set_ucred_caps(mypid, caps)) {
+    klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    ret = -1;
+  }
+  if(kernel_set_ucred_authid(mypid, authid)) {
+    klog_puts("[elfldr.elf] kernel_set_ucred_authid() failed");
+    ret = -1;
   }
 
-  syscall(SYS_thr_set_name, -1, "elfldr(bootstrap)");
-  while(1) {
-    if((pid=elfldr_spawn(-1, socksrv_elf)) < 0) {
-      _exit(-1);
-    }
-
-    waitpid_nohang(pid);
-    sleep(3);
-  }
-
-  return 0;
+  return ret;
 }

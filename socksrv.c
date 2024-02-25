@@ -15,28 +15,19 @@ along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
 #include <arpa/inet.h>
-#include <fcntl.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <signal.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <sys/socket.h>
 #include <sys/syscall.h>
-#include <sys/sysctl.h>
-#include <sys/wait.h>
 
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
 #include "klog.h"
-#include "pt.h"
-
 
 
 /**
@@ -73,6 +64,7 @@ static void
 on_connection(int fd) {
   uint8_t* elf;
 
+  // Read ELF from the socket
   if(!(elf=readsock(fd))) {
     return;
   }
@@ -183,11 +175,22 @@ serve_elfldr(uint16_t port) {
  **/
 int main() {
   const int port = 9021;
-
-  signal(SIGCHLD, SIG_IGN);
-  syscall(SYS_thr_set_name, -1, "elfldr(socksrv)");
+  pid_t pid;
 
   klog_printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
+
+  while((pid=elfldr_find_pid("elfldr.elf")) > 0) {
+    if(kill(pid, SIGKILL)) {
+      klog_perror("kill");
+      _exit(-1);
+    }
+    sleep(1);
+  }
+
+  syscall(SYS_thr_set_name, -1, "elfldr.elf");
+  signal(SIGCHLD, SIG_IGN);
+  signal(SIGPIPE, SIG_IGN);
+  syscall(SYS_setsid);
 
   while(1) {
     serve_elfldr(port);

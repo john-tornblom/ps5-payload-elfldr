@@ -94,6 +94,10 @@ pt_load(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   intptr_t addr = ctx->base_addr + phdr->p_vaddr;
   size_t memsz = ROUND_PG(phdr->p_memsz);
 
+  if(!phdr->p_memsz) {
+    return 0;
+  }
+
   if((addr=pt_mmap(ctx->pid, addr, memsz, PROT_WRITE | PROT_READ,
 		   MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
 		   -1, 0)) == -1) {
@@ -101,7 +105,11 @@ pt_load(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
     return -1;
   }
 
-  if(mdbg_copyin(ctx->pid, ctx->elf+phdr->p_offset, addr, phdr->p_memsz)) {
+  if(!phdr->p_filesz) {
+    return 0;
+  }
+
+  if(mdbg_copyin(ctx->pid, ctx->elf+phdr->p_offset, addr, phdr->p_filesz)) {
     pt_perror(ctx->pid, "[elfldr.elf] mdbg_copyin");
     return -1;
   }
@@ -420,10 +428,31 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
 
 
 /**
- * Raise privileges of a process so it can allocate JIT memory and
- * access the SceSpZeroConf eboot.
+ * Set the name of a process.
  **/
 static int
+elfldr_set_procname(pid_t pid, const char* name) {
+  intptr_t buf;
+
+  if((buf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
+		  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
+    pt_perror(pid, "[elfldr.elf] pt_mmap");
+    return -1;
+  }
+
+  mdbg_copyin(pid, name, buf, strlen(name)+1);
+  pt_syscall(pid, SYS_thr_set_name, -1, buf);
+  pt_msync(pid, buf, PAGE_SIZE, MS_SYNC);
+  pt_munmap(pid, buf, PAGE_SIZE);
+
+  return 0;
+}
+
+
+/**
+ * Escape jail and raise privileges.
+ **/
+int
 elfldr_raise_privileges(pid_t pid) {
   uint8_t caps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
                       0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
@@ -447,36 +476,34 @@ elfldr_raise_privileges(pid_t pid) {
 
 
 /**
- * Set the name of a process.
- **/
-int
-elfldr_set_procname(pid_t pid, const char* name) {
-  intptr_t buf;
-
-  if((buf=pt_mmap(pid, 0, PAGE_SIZE, PROT_READ | PROT_WRITE,
-		  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == -1) {
-    pt_perror(pid, "[elfldr.elf] pt_mmap");
-    return -1;
-  }
-
-  mdbg_copyin(pid, name, buf, strlen(name)+1);
-  pt_syscall(pid, SYS_thr_set_name, -1, buf);
-  pt_msync(pid, buf, PAGE_SIZE, MS_SYNC);
-  pt_munmap(pid, buf, PAGE_SIZE);
-
-  return 0;
-}
-
-
-/**
  * Execute an ELF inside the process with the given pid.
  **/
 int
 elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
+  uint8_t caps[16];
+  uint64_t authid;
+  intptr_t vnode;
+  int error = 0;
+
+  // backup privileges
+  if(!(vnode=kernel_get_proc_rootdir(pid))) {
+    klog_puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
+    pt_detach(pid);
+    return -1;
+  }
+  if(kernel_get_ucred_caps(pid, caps)) {
+    klog_puts("[elfldr.elf] kernel_get_ucred_caps() failed");
+    pt_detach(pid);
+    return -1;
+  }
+  if(!(authid=kernel_get_ucred_authid(pid))) {
+    klog_puts("[elfldr.elf] kernel_get_ucred_authid() failed");
+    pt_detach(pid);
+    return -1;
+  }
 
   if(elfldr_raise_privileges(pid)) {
     klog_puts("[elfldr.elf] Unable to raise privileges");
-    kill(pid, SIGKILL);
     pt_detach(pid);
     return -1;
   }
@@ -494,20 +521,32 @@ elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
 
     pt_close(pid, stdio);
   }
-  
+
   if(elfldr_prepare_exec(pid, elf)) {
-    kill(pid, SIGKILL);
-    pt_detach(pid);
-    return -1;
+    error = -1;
+  }
+
+  // restore privileges
+  if(kernel_set_proc_rootdir(pid, vnode)) {
+    klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
+    error = -1;
+  }
+
+  if(kernel_set_ucred_caps(pid, caps)) {
+    klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    error = -1;
+  }
+  if(kernel_set_ucred_authid(pid, authid)) {
+    klog_puts("[elfldr.elf] kernel_set_ucred_authid() failed");
+    error = -1;
   }
 
   if(pt_detach(pid)) {
     klog_perror("[elfldr.elf] pt_detach");
-    kill(pid, SIGKILL);
-    return -1;
+    error = -1;
   }
 
-  return 0;
+  return error;
 }
 
 
@@ -586,7 +625,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
     pt_detach(pid);
     return -1;
   }
-
+  brkpoint += 58;// offset to invocation of main()
   if(mdbg_copyout(pid, brkpoint, &orginstr, sizeof(orginstr))) {
     klog_perror("[elfldr.elf] mdbg_copyout");
     kill(pid, SIGKILL);
@@ -623,9 +662,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   // Execute the ELF
   elfldr_set_procname(pid, "homebrew");
   if(elfldr_exec(pid, stdio, elf)) {
-    klog_perror("[elfldr.elf] pt_detach");
     kill(pid, SIGKILL);
-    pt_detach(pid);
     return -1;
   }
 

@@ -34,33 +34,20 @@ along with this program; see the file COPYING. If not, see
 
 static int
 sys_ptrace(int request, pid_t pid, caddr_t addr, int data) {
-  uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-                          0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
   pid_t mypid = getpid();
-  uint8_t caps[16];
   uint64_t authid;
   int ret;
 
   if(!(authid=kernel_get_ucred_authid(mypid))) {
     return -1;
   }
-  if(kernel_get_ucred_caps(mypid, caps)) {
-    return -1;
-  }
-
   if(kernel_set_ucred_authid(mypid, 0x4800000000010003l)) {
-    return -1;
-  }
-  if(kernel_set_ucred_caps(mypid, privcaps)) {
     return -1;
   }
 
   ret = (int)syscall(SYS_ptrace, request, pid, addr, data);
 
   if(kernel_set_ucred_authid(mypid, authid)) {
-    return -1;
-  }
-  if(kernel_set_ucred_caps(mypid, caps)) {
     return -1;
   }
 

@@ -14,12 +14,6 @@ You should have received a copy of the GNU General Public License
 along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/sysctl.h>
-
 #include <ps5/kernel.h>
 
 #include "elfldr.h"
@@ -30,33 +24,7 @@ along with this program; see the file COPYING. If not, see
 
 
 /**
- * Escape jail and raise privileges.
- **/
-static int
-raise_privileges(pid_t pid) {
-  uint8_t privcaps[16] = {0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
-                          0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff};
-  intptr_t vnode;
-
-  if(!(vnode=kernel_get_root_vnode())) {
-    klog_puts("[elfldr.elf] kernel_get_root_vnode() failed");
-    return -1;
-  }
-  if(kernel_set_proc_rootdir(pid, vnode)) {
-    klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
-    return -1;
-  }
-  if(kernel_set_ucred_caps(pid, privcaps)) {
-    klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
-    return -1;
-  }
-
-  return 0;
-}
-
-
-/**
- * Attach to SceRedisServer and run bootstrap.elf.
+ * We are running inside bdj.elf, attach to SceRedisServer and run bootstrap.elf
  **/
 int
 main() {
@@ -68,17 +36,18 @@ main() {
   pid_t vpid;
   int ret;
 
+  // enable debugging with ptrace
   if(kernel_get_qaflags(qa_flags)) {
     klog_puts("[elfldr.elf] kernel_get_qa_flags() failed");
     return -1;
   }
-  qa_flags[1] |= 0x03; // Enable debugging with ptrace
+  qa_flags[1] |= 0x03;
   if(kernel_set_qaflags(qa_flags)) {
     klog_puts("[elfldr.elf] kernel_set_qa_flags() failed");
     return -1;
   }
 
-  // backup privileges
+  // backup my privileges
   if(!(vnode=kernel_get_proc_rootdir(mypid))) {
     klog_puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
     return -1;
@@ -92,32 +61,32 @@ main() {
     return -1;
   }
 
-  if((vpid=elfldr_find_pid("SceRedisServer")) < 0) {
+  // launch bootstrap.elf inside SceRedisServer
+  if((vpid=elfldr_find_pid("SceSpZeroConf")) < 0) {
     klog_puts("[elfldr.elf] elfldr_find_pid() failed");
     return -1;
+  } else if(elfldr_raise_privileges(mypid)) {
+    klog_puts("[elfldr.elf] Unable to raise privileges");
+    ret = -1;
+  } else if(pt_attach(vpid)) {
+    klog_perror("[elfldr.elf] pt_attach");
+    ret = -1;
+  } else {
+    ret = elfldr_exec(vpid, -1, bootstrap_elf);
   }
 
-  // raise our privileges and run bootstrap.elf inside SceRedisServer
-  if(!raise_privileges(mypid)) {
-    if(!pt_attach(vpid)) {
-      ret = elfldr_exec(vpid, -1, bootstrap_elf);
-    } else {
-      klog_perror("[elfldr.elf] pt_attach");
-    }
-  }
-
-  // restore privileges
+  // restore my privileges
   if(kernel_set_proc_rootdir(mypid, vnode)) {
     klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
-    return -1;
+    ret = -1;
   }
   if(kernel_set_ucred_caps(mypid, caps)) {
     klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
-    return -1;
+    ret = -1;
   }
   if(kernel_set_ucred_authid(mypid, authid)) {
     klog_puts("[elfldr.elf] kernel_set_ucred_authid() failed");
-    return -1;
+    ret = -1;
   }
 
   return ret;
