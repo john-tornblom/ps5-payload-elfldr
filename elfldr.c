@@ -464,6 +464,9 @@ elfldr_raise_privileges(pid_t pid) {
   if(kernel_set_proc_rootdir(pid, vnode)) {
     return -1;
   }
+  if(kernel_set_proc_jaildir(pid, 0)) {
+    return -1;
+  }
   if(kernel_set_ucred_uid(pid, 0)) {
     return -1;
   }
