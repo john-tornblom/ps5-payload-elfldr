@@ -179,6 +179,11 @@ int main() {
 
   klog_printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
 
+  if(chdir("/")) {
+    klog_perror("chdir");
+    return -1;
+  }
+
   while((pid=elfldr_find_pid("elfldr.elf")) > 0) {
     if(kill(pid, SIGKILL)) {
       klog_perror("kill");
