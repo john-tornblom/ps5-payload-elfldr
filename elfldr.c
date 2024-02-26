@@ -481,12 +481,14 @@ elfldr_raise_privileges(pid_t pid) {
 int
 elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
   uint8_t caps[16];
+  intptr_t jaildir;
+  intptr_t rootdir;
   uint64_t authid;
-  intptr_t vnode;
   int error = 0;
 
   // backup privileges
-  if(!(vnode=kernel_get_proc_rootdir(pid))) {
+  jaildir = kernel_get_proc_jaildir(pid);
+  if(!(rootdir=kernel_get_proc_rootdir(pid))) {
     klog_puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
     pt_detach(pid);
     return -1;
@@ -527,7 +529,11 @@ elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
   }
 
   // restore privileges
-  if(kernel_set_proc_rootdir(pid, vnode)) {
+  if(kernel_set_proc_jaildir(pid, jaildir)) {
+    klog_puts("[elfldr.elf] kernel_set_proc_jaildir() failed");
+    error = -1;
+  }
+  if(kernel_set_proc_rootdir(pid, rootdir)) {
     klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
     error = -1;
   }

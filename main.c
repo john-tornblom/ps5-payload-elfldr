@@ -48,8 +48,8 @@ main() {
   }
 
   // backup my privileges
-  if(!(vnode=kernel_get_proc_rootdir(mypid))) {
-    klog_puts("[elfldr.elf] kernel_get_proc_rootdir() failed");
+  if(!(vnode=kernel_get_proc_jaildir(mypid))) {
+    klog_puts("[elfldr.elf] kernel_get_proc_jaildir() failed");
     return -1;
   }
   if(kernel_get_ucred_caps(mypid, caps)) {
@@ -76,6 +76,10 @@ main() {
   }
 
   // restore my privileges
+  if(kernel_set_proc_jaildir(mypid, vnode)) {
+    klog_puts("[elfldr.elf] kernel_set_proc_jaildir() failed");
+    ret = -1;
+  }
   if(kernel_set_proc_rootdir(mypid, vnode)) {
     klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
     ret = -1;
