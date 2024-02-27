@@ -38,38 +38,38 @@ main() {
 
   // enable debugging with ptrace
   if(kernel_get_qaflags(qa_flags)) {
-    klog_puts("[elfldr.elf] kernel_get_qa_flags() failed");
+    klog_puts("kernel_get_qa_flags failed");
     return -1;
   }
   qa_flags[1] |= 0x03;
   if(kernel_set_qaflags(qa_flags)) {
-    klog_puts("[elfldr.elf] kernel_set_qa_flags() failed");
+    klog_puts("kernel_set_qa_flags failed");
     return -1;
   }
 
   // backup my privileges
-  if(!(vnode=kernel_get_proc_jaildir(mypid))) {
-    klog_puts("[elfldr.elf] kernel_get_proc_jaildir() failed");
+  if(!(vnode=kernel_get_proc_rootdir(mypid))) {
+    klog_puts("kernel_get_proc_rootdir failed");
     return -1;
   }
   if(kernel_get_ucred_caps(mypid, caps)) {
-    klog_puts("[elfldr.elf] kernel_get_ucred_caps() failed");
+    klog_puts("kernel_get_ucred_caps failed");
     return -1;
   }
   if(!(authid=kernel_get_ucred_authid(mypid))) {
-    klog_puts("[elfldr.elf] kernel_get_ucred_authid() failed");
+    klog_puts("kernel_get_ucred_authid failed");
     return -1;
   }
 
   // launch bootstrap.elf inside SceSpZeroConf
-  if((vpid=elfldr_find_pid("SceSpZeroConf")) < 0) {
-    klog_puts("[elfldr.elf] elfldr_find_pid() failed");
+  if((vpid=elfldr_find_pid("SceRedisServer")) < 0) {
+    klog_puts("elfldr_find_pid failed");
     return -1;
   } else if(elfldr_raise_privileges(mypid)) {
-    klog_puts("[elfldr.elf] Unable to raise privileges");
+    klog_puts("Unable to raise privileges");
     ret = -1;
   } else if(pt_attach(vpid)) {
-    klog_perror("[elfldr.elf] pt_attach");
+    klog_perror("pt_attach");
     ret = -1;
   } else {
     ret = elfldr_exec(vpid, -1, bootstrap_elf);
@@ -77,19 +77,19 @@ main() {
 
   // restore my privileges
   if(kernel_set_proc_jaildir(mypid, vnode)) {
-    klog_puts("[elfldr.elf] kernel_set_proc_jaildir() failed");
+    klog_puts("kernel_set_proc_jaildir failed");
     ret = -1;
   }
   if(kernel_set_proc_rootdir(mypid, vnode)) {
-    klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
+    klog_puts("kernel_set_proc_rootdir failed");
     ret = -1;
   }
   if(kernel_set_ucred_caps(mypid, caps)) {
-    klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    klog_puts("kernel_set_ucred_caps failed");
     ret = -1;
   }
   if(kernel_set_ucred_authid(mypid, authid)) {
-    klog_puts("[elfldr.elf] kernel_set_ucred_authid() failed");
+    klog_puts("kernel_set_ucred_authid failed");
     ret = -1;
   }
 

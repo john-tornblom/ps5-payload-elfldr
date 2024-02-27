@@ -14,18 +14,16 @@
 # along with this program; see the file COPYING. If not see
 # <http://www.gnu.org/licenses/>.
 
-ifndef PS5_PAYLOAD_SDK
-    $(error PS5_PAYLOAD_SDK is undefined)
-endif
-
 PS5_HOST ?= ps5
 PS5_PORT ?= 9020
 
-CC := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-cc
-LD := $(PS5_PAYLOAD_SDK)/host/x86_64-ps5-payload-ld
+ifdef PS5_PAYLOAD_SDK
+    include $(PS5_PAYLOAD_SDK)/make/x86_64-ps5-payload.inc
+else
+    $(error PS5_PAYLOAD_SDK is undefined)
+endif
 
-CFLAGS := -Wall -Werror
-LDADD  := -lkernel_web -lSceLibcInternal
+CFLAGS += -Wall -Werror
 
 all: elfldr.elf
 
@@ -36,19 +34,19 @@ bootstrap.o: socksrv_elf.c
 main.o: bootstrap_elf.c
 
 bootstrap.elf: bootstrap.o elfldr.o pt.o klog.o
-	$(LD) $^ $(LDADD) -o $@
+	$(LD) $^ $(LDADD) -lkernel_sys -o $@
 
 bootstrap_elf.c: bootstrap.elf
 	xxd -i $^ > $@
 
 socksrv.elf: socksrv.o elfldr.o pt.o klog.o
-	$(LD) $^ $(LDADD) -o $@
+	$(LD) $^ $(LDADD) -lkernel_sys -o $@
 
 socksrv_elf.c: socksrv.elf
 	xxd -i $^ > $@
 
 elfldr.elf: main.o elfldr.o pt.o klog.o
-	$(LD) $^ $(LDADD) -o $@
+	$(LD) $^ $(LDADD) -lkernel_web -o $@
 
 clean:
 	rm -f bootstrap_elf.c socksrv_elf.c *.o *.elf

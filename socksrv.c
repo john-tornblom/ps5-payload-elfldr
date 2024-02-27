@@ -43,7 +43,7 @@ readsock(int fd) {
   while((len=read(fd, buf, sizeof(buf)))) {
     data = realloc(data, offset + len + 1);
     if(data == 0) {
-      klog_perror("[elfldr.elf] realloc");
+      klog_perror("realloc");
       return 0;
     }
 
@@ -93,7 +93,7 @@ serve_elfldr(uint16_t port) {
   int srvfd;
 
   if(getifaddrs(&ifaddr) == -1) {
-    klog_perror("[elfldr.elf] getifaddrs");
+    klog_perror("getifaddrs");
     return -1;
   }
 
@@ -121,7 +121,7 @@ serve_elfldr(uint16_t port) {
     }
     ifaddr_wait = 0;
 
-    klog_printf("[elfldr.elf] Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
+    klog_printf("Serving ELF loader on %s:%d (%s)\n", ip, port, ifa->ifa_name);
   }
 
   freeifaddrs(ifaddr);
@@ -131,12 +131,12 @@ serve_elfldr(uint16_t port) {
   }
 
   if((srvfd=socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    klog_perror("[elfldr.elf] socket");
+    klog_perror("socket");
     return -1;
   }
 
   if(setsockopt(srvfd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
-    klog_perror("[elfldr.elf] setsockopt");
+    klog_perror("setsockopt");
     return -1;
   }
 
@@ -146,19 +146,19 @@ serve_elfldr(uint16_t port) {
   srvaddr.sin_port = htons(port);
 
   if(bind(srvfd, (struct sockaddr*)&srvaddr, sizeof(srvaddr)) != 0) {
-    klog_perror("[elfldr.elf] bind");
+    klog_perror("bind");
     return -1;
   }
 
   if(listen(srvfd, 5) != 0) {
-    klog_perror("[elfldr.elf] listen");
+    klog_perror("listen");
     return -1;
   }
 
   while(1) {
     socklen = sizeof(cliaddr);
     if((connfd=accept(srvfd, (struct sockaddr*)&cliaddr, &socklen)) < 0) {
-      klog_perror("[elfldr.elf] accept");
+      klog_perror("accept");
       break;
     }
 
@@ -177,7 +177,7 @@ int main() {
   const int port = 9021;
   pid_t pid;
 
-  klog_printf("[elfldr.elf] ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
+  klog_printf("ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
 
   if(chdir("/")) {
     klog_perror("chdir");

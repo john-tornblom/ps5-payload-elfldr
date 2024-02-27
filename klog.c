@@ -32,7 +32,7 @@ klog_printf(const char *fmt, ...) {
   vsnprintf(sargs, sizeof sargs, fmt, args);
   va_end(args);
 
-  snprintf(buf, sizeof buf, "<118>%s", sargs);
+  snprintf(buf, sizeof buf, "<118>[elfldr.elf] %s", sargs);
 
   return (int)syscall(0x259, 7, buf, 0);
 }
@@ -42,7 +42,7 @@ int
 klog_puts(const char *s) {
   char buf[0x2000];
 
-  snprintf(buf, sizeof buf, "<118>%s\n", s);
+  snprintf(buf, sizeof buf, "<118>[elfldr.elf] %s\n", s);
 
   return (int)syscall(0x259, 7, buf, 0);
 }
@@ -52,7 +52,7 @@ int
 klog_perror(const char *s) {
   char buf[0x2000];
 
-  snprintf(buf, sizeof buf, "<118>%s: %s\n", s, strerror(errno));
+  snprintf(buf, sizeof buf, "<118>[elfldr.elf] %s: %s\n", s, strerror(errno));
 
   return (int)syscall(0x259, 7, buf, 0);
 }

@@ -38,22 +38,22 @@ main() {
   int ret;
 
   // backup my privileges
-  if(!(vnode=kernel_get_proc_jaildir(mypid))) {
-    klog_puts("[elfldr.elf] kernel_get_proc_jaildir() failed");
+  if(!(vnode=kernel_get_proc_rootdir(mypid))) {
+    klog_puts("kernel_get_proc_rootdir failed");
     return -1;
   }
   if(kernel_get_ucred_caps(mypid, caps)) {
-    klog_puts("[elfldr.elf] kernel_get_ucred_caps() failed");
+    klog_puts("kernel_get_ucred_caps failed");
     return -1;
   }
   if(!(authid=kernel_get_ucred_authid(mypid))) {
-    klog_puts("[elfldr.elf] kernel_get_ucred_authid() failed");
+    klog_puts("kernel_get_ucred_authid failed");
     return -1;
   }
 
   // launch socksrv.elf in a new processes
   if(elfldr_raise_privileges(mypid)) {
-    klog_puts("[elfldr.elf] Unable to raise privileges");
+    klog_puts("Unable to raise privileges");
     ret = -1;
   } else {
     signal(SIGCHLD, SIG_IGN);
@@ -62,19 +62,19 @@ main() {
 
   // restore my privileges
   if(kernel_set_proc_jaildir(mypid, vnode)) {
-    klog_puts("[elfldr.elf] kernel_set_proc_jaildir() failed");
+    klog_puts("kernel_set_proc_jaildir failed");
     ret = -1;
   }
   if(kernel_set_proc_rootdir(mypid, vnode)) {
-    klog_puts("[elfldr.elf] kernel_set_proc_rootdir() failed");
+    klog_puts("kernel_set_proc_rootdir failed");
     ret = -1;
   }
   if(kernel_set_ucred_caps(mypid, caps)) {
-    klog_puts("[elfldr.elf] kernel_set_ucred_caps() failed");
+    klog_puts("kernel_set_ucred_caps failed");
     ret = -1;
   }
   if(kernel_set_ucred_authid(mypid, authid)) {
-    klog_puts("[elfldr.elf] kernel_set_ucred_authid() failed");
+    klog_puts("kernel_set_ucred_authid failed");
     ret = -1;
   }
 
