@@ -670,7 +670,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   }
 
   // Execute the ELF
-  elfldr_set_procname(pid, "homebrew");
+  elfldr_set_procname(pid, argv[0]);
   if(elfldr_exec(pid, stdio, elf)) {
     kill(pid, SIGKILL);
     return -1;
