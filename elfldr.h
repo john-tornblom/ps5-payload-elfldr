@@ -20,7 +20,7 @@ along with this program; see the file COPYING. If not, see
 
 pid_t elfldr_find_pid(const char* name);
 
-pid_t elfldr_spawn(int stdio, uint8_t *elf);
+pid_t elfldr_spawn(const char* progname, int stdio, uint8_t *elf);
 int   elfldr_exec(pid_t pid, int stdio, uint8_t* elf);
 
 int elfldr_raise_privileges(pid_t pid);

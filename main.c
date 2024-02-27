@@ -15,12 +15,24 @@ along with this program; see the file COPYING. If not, see
 <http://www.gnu.org/licenses/>.  */
 
 #include <ps5/kernel.h>
+#include <ps5/klog.h>
 
 #include "elfldr.h"
-#include "klog.h"
 #include "pt.h"
 
 #include "bootstrap_elf.c"
+
+
+/**
+ * sceKernelSpawn() is not available in libkernel_web, which is what is used by
+ * the webkit exploit entry point. However, we do not actually use it initially,
+ * hence we just define an empty stub to silence the linker.
+ **/
+int
+sceKernelSpawn(int *pid, int dbg, const char *path, char *root,
+	       char* argv[]) {
+  return -1;
+}
 
 
 /**
@@ -35,6 +47,8 @@ main() {
   intptr_t vnode;
   pid_t vpid;
   int ret;
+
+  klog_puts("Bootstrapping elfldr.elf...");
 
   // enable debugging with ptrace
   if(kernel_get_qaflags(qa_flags)) {

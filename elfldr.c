@@ -34,10 +34,10 @@ along with this program; see the file COPYING. If not, see
 #include <sys/wait.h>
 
 #include <ps5/kernel.h>
+#include <ps5/klog.h>
 #include <ps5/mdbg.h>
 
 #include "elfldr.h"
-#include "klog.h"
 #include "pt.h"
 
 
@@ -72,6 +72,10 @@ typedef struct elfldr_ctx {
  * Absolute path to the SceSpZeroConf eboot.
  **/
 static const char* SceSpZeroConf = "/system/vsh/app/NPXS40112/eboot.bin";
+
+
+int sceKernelSpawn(int *pid, int dbg, const char *path, char *root,
+		   const char* argv[]);
 
 
 /**
@@ -563,66 +567,15 @@ elfldr_exec(pid_t pid, int stdio, uint8_t* elf) {
  * Execute an ELF inside a new process.
  **/
 pid_t
-elfldr_spawn(int stdio, uint8_t* elf) {
-  char* argv[] = {"homebrew", 0};
+elfldr_spawn(const char* progname, int stdio, uint8_t* elf) {
+  const char* argv[] = {progname, 0};
   uint8_t int3instr = 0xcc;
-  struct kevent evt;
   intptr_t brkpoint;
   uint8_t orginstr;
   pid_t pid = -1;
-  int kq;
 
-  if((kq=kqueue()) < 0) {
-    klog_perror("kqueue");
-    return -1;
-  }
-
-  if((pid=syscall(SYS_rfork, RFPROC | RFCFDG)) < 0) {
-    klog_perror("rfork");
-    close(kq);
-    return pid;
-  }
-
-  if(!pid) {
-    if(open("/dev/deci_stdin", O_RDONLY) < 0) {
-      klog_perror("open");
-      _exit(-1);
-    }
-    if(open("/dev/deci_stdout", O_WRONLY) < 0) {
-      klog_perror("open");
-      _exit(-1);
-    }
-    if(open("/dev/deci_stderr", O_WRONLY) < 0) {
-      klog_perror("open");
-      _exit(-1);
-    }
-
-    if(syscall(SYS_ptrace, PT_TRACE_ME, 0, 0, 0) < 0) {
-      klog_perror("ptrace");
-      _exit(-1);
-    }
-
-    if(execve(SceSpZeroConf, argv, 0) < 0) {
-      klog_perror("execve");
-      _exit(-1);
-    }
-    _exit(-1);
-  }
-
-  EV_SET(&evt, pid, EVFILT_PROC, EV_ADD, NOTE_EXEC | NOTE_EXIT, 0, NULL);
-  if(kevent(kq, &evt, 1, &evt, 1, NULL) < 0) {
-    klog_perror("kevent");
-    kill(pid, SIGKILL);
-    pt_detach(pid);
-    close(kq);
-    return -1;
-  }
-
-  close(kq);
-  if(waitpid(pid, 0, 0) < 0) {
-    klog_perror("waitpid");
-    pt_continue(pid, SIGKILL);
-    pt_detach(pid);
+  if(sceKernelSpawn(&pid, 1, SceSpZeroConf, 0, argv)) {
+    perror("sceKernelSpawn");
     return -1;
   }
 
@@ -670,7 +623,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
   }
 
   // Execute the ELF
-  elfldr_set_procname(pid, argv[0]);
+  elfldr_set_procname(pid, progname);
   if(elfldr_exec(pid, stdio, elf)) {
     kill(pid, SIGKILL);
     return -1;
@@ -686,6 +639,7 @@ elfldr_spawn(int stdio, uint8_t* elf) {
 pid_t
 elfldr_find_pid(const char* name) {
   int mib[4] = {1, 14, 8, 0};
+  pid_t mypid = getpid();
   pid_t pid = -1;
   size_t buf_size;
   uint8_t *buf;
@@ -712,7 +666,7 @@ elfldr_find_pid(const char* name) {
     char *ki_tdname = (char*)&ptr[447];
 
     ptr += ki_structsize;
-    if(!strcmp(name, ki_tdname)) {
+    if(!strcmp(name, ki_tdname) && ki_pid != mypid) {
       pid = ki_pid;
     }
   }

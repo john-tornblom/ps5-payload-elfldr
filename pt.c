@@ -27,8 +27,8 @@ along with this program; see the file COPYING. If not, see
 #include <sys/mman.h>
 
 #include <ps5/kernel.h>
+#include <ps5/klog.h>
 
-#include "klog.h"
 #include "pt.h"
 
 

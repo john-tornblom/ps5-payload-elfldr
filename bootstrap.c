@@ -18,16 +18,16 @@ along with this program; see the file COPYING. If not, see
 #include <stdio.h>
 
 #include <ps5/kernel.h>
+#include <ps5/klog.h>
 
 #include "elfldr.h"
-#include "klog.h"
 #include "pt.h"
 
 #include "socksrv_elf.c"
 
 
 /**
- * We are running inside SceSpZeroConf, spawn socksrv.elf.
+ * We are running inside SceRedisServer, spawn socksrv.elf.
  **/
 int
 main() {
@@ -36,6 +36,8 @@ main() {
   uint64_t authid;
   intptr_t vnode;
   int ret;
+
+  klog_puts("Spawning elfldr.elf...");
 
   // backup my privileges
   if(!(vnode=kernel_get_proc_rootdir(mypid))) {
@@ -57,7 +59,7 @@ main() {
     ret = -1;
   } else {
     signal(SIGCHLD, SIG_IGN);
-    ret = elfldr_spawn(-1, socksrv_elf);
+    ret = elfldr_spawn("elfldr.elf", -1, socksrv_elf);
   }
 
   // restore my privileges

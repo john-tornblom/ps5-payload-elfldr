@@ -25,9 +25,9 @@ along with this program; see the file COPYING. If not, see
 #include <sys/syscall.h>
 
 #include <ps5/kernel.h>
+#include <ps5/klog.h>
 
 #include "elfldr.h"
-#include "klog.h"
 
 
 /**
@@ -71,7 +71,7 @@ on_connection(int fd) {
 
   // Check for the ELF magic header
   if(!memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
-    elfldr_spawn(fd, elf);
+    elfldr_spawn("payload.elf", fd, elf);
   }
 
   free(elf);
@@ -177,7 +177,7 @@ int main() {
   const int port = 9021;
   pid_t pid;
 
-  klog_printf("ELF loader was compiled at %s %s\n", __DATE__, __TIME__);
+  klog_printf("Socket server was compiled at %s %s\n", __DATE__, __TIME__);
 
   if(chdir("/")) {
     klog_perror("chdir");
