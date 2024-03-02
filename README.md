@@ -9,6 +9,18 @@ the PS5 returns from rest mode. Payloads that are loaded are executed in
 induvidual processes, so if a payload crashes, the ELF loader will keep on
 running.
 
+## Quick-start
+To deploy ps5-payload-elfldr, first launch a kernel exploit that provides
+a rudimentary ELF loader on port 9020, e.g., [BD-J ps5-payload-loader][bdj],
+or the [webkit approached from Specter][webkit], then run the following:
+```console
+john@localhost:~$ export PS5_HOST=ps5
+john@localhost:~$ wget -q -O - https://github.com/john-tornblom/ps5-payload-elfldr/releases/download/release%2Fv0.9/Payload.zip | gunzip -c -d | nc -q0 $PS5_HOST 9020
+```
+**Note**: recent versions of the [BD-J ps5-payload-loader][bdj] includes a
+binary version of ps5-payload-elfldr which can be launched directly from the
+menu system.
+
 ## Building
 Assuming you have the [ps5-payload-sdk][sdk] installed on a POSIX machine,
 the ELF loader can be compiled using the following two commands:
@@ -16,22 +28,6 @@ the ELF loader can be compiled using the following two commands:
 ```console
 john@localhost:ps5-payload-elfldr$ export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 john@localhost:ps5-payload-elfldr$ make
-```
-
-## Usage
-To deploy the ELF loader itself, we first bootstrap via the one bundled with the
-exploit of your choice.
-```console
-john@localhost:ps5-payload-elfldr$ export PS5_HOST=ps5
-john@localhost:ps5-payload-elfldr$ nc -q0 $PS5_HOST 9020 < elfldr.elf
-```
-**Note**: recent versions of the [BD-J ps5-payload-loader][bdj] include a binary
-version of this ELF loader which can be launched directly from the menu system.
-
-Once the payload has been launched, a new socket server is started that accepts
-ELFs on port 9021:
-```console
-john@localhost:ps5-payload-elfldr$ nc -q0 $PS5_HOST 9021 < hello_world.elf
 ```
 
 ## Reporting Bugs
@@ -44,4 +40,3 @@ to discuss the solution properly before you commit time and effort.
 [sdk]: https://github.com/john-tornblom/ps5-payload-sdk
 [webkit]: https://github.com/Cryptogenic/PS5-IPV6-Kernel-Exploit
 [issues]: https://github.com/john-tornblom/ps5-payload-elfldr/issues/new
-

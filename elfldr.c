@@ -420,7 +420,7 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
   r.r_rdi = args;
   r.r_rsi = 0; // argc
   r.r_rdx = 0; // argv
-  r.r_r10 = 0; // envp
+  r.r_rcx = 0; // envp
 
   if(pt_setregs(pid, &r)) {
     klog_perror("pt_setregs");

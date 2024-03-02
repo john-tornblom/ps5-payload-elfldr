@@ -21,7 +21,6 @@ along with this program; see the file COPYING. If not, see
 int
 main() {
   printf("pid=%d\n", getpid());
-
   return 0;
 }
 

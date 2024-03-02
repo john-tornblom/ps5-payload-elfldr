@@ -23,19 +23,15 @@ else
     $(error PS5_PAYLOAD_SDK is undefined)
 endif
 
-ELF := test.elf
-OBJ := test.o
-
 LDADD += -lkernel_web
 
-all: $(ELF)
+all: getpid_test.elf
 
-$(ELF): $(OBJ)
+getpid_test.elf: getpid_test.o
 	$(LD) $^ $(LDADD) -o $@
 
 clean:
-	rm -f $(OBJ) $(ELF)
+	rm -f *.o *.elf
 
-test: $(ELF)
+getpid_test: getpid_test.elf
 	@nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
-
