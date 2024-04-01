@@ -20,7 +20,7 @@ SCRIPTDIR="$(dirname "${SCRIPTDIR}")"
 
 cd $SCRIPTDIR || exit 1
 
-echo "Deploying getpid_getpid.elf 5000 times..."
+echo "Deploying getpid_test.elf 5000 times..."
 sleep 3
 
 for i in {1..5000}
