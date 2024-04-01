@@ -397,6 +397,8 @@ elfldr_payload_args(pid_t pid) {
  **/
 static int
 elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
+  uint16_t call_rax = 0xd0ff;
+  uint16_t org_inst;
   intptr_t entry;
   intptr_t args;
   struct reg r;
@@ -416,7 +418,23 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
     return -1;
   }
 
-  r.r_rip = entry;
+  // backup next instruction
+  if(mdbg_copyout(pid, r.r_rip, &org_inst, sizeof(org_inst))) {
+    perror("mdbg_copyout");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // replace next instruction with a call to rax
+  if(mdbg_copyin(pid, &call_rax, r.r_rip, sizeof(call_rax))) {
+    perror("mdbg_copyin");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  r.r_rax = entry;
   r.r_rdi = args;
   r.r_rsi = 0; // argc
   r.r_rdx = 0; // argv
@@ -424,6 +442,24 @@ elfldr_prepare_exec(pid_t pid, uint8_t *elf) {
 
   if(pt_setregs(pid, &r)) {
     klog_perror("pt_setregs");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // call entry pointed at from rax
+  if(pt_step(pid)) {
+    klog_perror("pt_step");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
+    return -1;
+  }
+
+  // restore next instruction
+  if(mdbg_copyin(pid, &org_inst, r.r_rip, sizeof(org_inst))) {
+    perror("mdbg_copyin");
+    kill(pid, SIGKILL);
+    pt_detach(pid);
     return -1;
   }
 
