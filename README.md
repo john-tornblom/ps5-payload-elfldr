@@ -22,10 +22,11 @@ binary version of ps5-payload-elfldr which can be launched directly from the
 menu system.
 
 ## Building
-Assuming you have the [ps5-payload-sdk][sdk] installed on a POSIX machine,
-the ELF loader can be compiled using the following two commands:
+Assuming you have the [ps5-payload-sdk][sdk] installed on a Debian-flavored
+operating system, the ELF loader can be compiled using the following commands:
 
 ```console
+john@localhost:ps5-payload-elfldr$ sudo apt-get install xxd
 john@localhost:ps5-payload-elfldr$ export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 john@localhost:ps5-payload-elfldr$ make
 ```
