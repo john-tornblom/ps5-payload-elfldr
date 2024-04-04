@@ -52,6 +52,6 @@ clean:
 	rm -f bootstrap_elf.c socksrv_elf.c *.o *.elf
 
 test: elfldr.elf
-	nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
+	$(PS5_PAYLOAD_DEPLOY) -h $(PS5_HOST) -p $(PS5_PORT) $^
 
 .INTERMEDIATE: socksrv_elf.c socksrv.elf bootstrap_elf.c bootstrap.elf
