@@ -135,8 +135,9 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   void* data = 0;
   int error = 0;
 
-  if(!(data=malloc(memsz))) {
-    klog_perror("malloc");
+  if(!(data=mmap(0, memsz, PROT_READ | PROT_WRITE,
+		 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0))) {
+    perror("mmap");
     return -1;
   }
 
@@ -185,7 +186,7 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
     pt_munmap(ctx->pid, addr, memsz);
   }
 
-  free(data);
+  munmap(data, memsz);
   pt_close(ctx->pid, alias_fd);
   pt_close(ctx->pid, shm_fd);
 
