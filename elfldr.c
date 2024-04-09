@@ -135,9 +135,9 @@ pt_reload(elfldr_ctx_t *ctx, Elf64_Phdr *phdr) {
   void* data = 0;
   int error = 0;
 
-  if(!(data=mmap(0, memsz, PROT_READ | PROT_WRITE,
-		 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0))) {
-    perror("mmap");
+  if((data=mmap(0, memsz, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE,
+		-1, 0)) == MAP_FAILED) {
+    klog_perror("mmap");
     return -1;
   }
 

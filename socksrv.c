@@ -21,6 +21,7 @@ along with this program; see the file COPYING. If not, see
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
 
@@ -31,29 +32,28 @@ along with this program; see the file COPYING. If not, see
 
 
 /**
+ * Maximum size of payloads.
+ **/
+#define ELF_SIZE_MAX 0x1000000 //16MiB
+
+
+/**
  * Read an ELF from a given file descriptor.
  **/
-static uint8_t*
-readsock(int fd) {
-  uint8_t buf[0x4000];
-  uint8_t* data = 0;
-  off_t offset = 0;
+static int
+readsock(int fd, uint8_t *buf, size_t size) {
+  off_t off = 0;
   ssize_t len;
 
-  while((len=read(fd, buf, sizeof(buf)))) {
-    data = realloc(data, offset + len + 1);
-    if(data == 0) {
-      klog_perror("realloc");
-      return 0;
+  while((len=read(fd, buf+off, size-off)) > 0) {
+    off += len;
+    if(size <= off) {
+      klog_puts("readsock: out of memory");
+      return -1;
     }
-
-    memcpy(data + offset, buf, len);
-    offset += len;
   }
 
-  data[offset] = 0;
-
-  return data;
+  return 0;
 }
 
 
@@ -62,19 +62,20 @@ readsock(int fd) {
  **/
 static void
 on_connection(int fd) {
+  size_t size = ELF_SIZE_MAX;
   uint8_t* elf;
 
-  // Read ELF from the socket
-  if(!(elf=readsock(fd))) {
+  if((elf=mmap(0, size, PROT_READ | PROT_WRITE,
+		 MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) == MAP_FAILED) {
+    klog_perror("mmap");
     return;
   }
 
-  // Check for the ELF magic header
-  if(!memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
+  if(!readsock(fd, elf, size) && !memcmp(elf, "\x7f\x45\x4c\x46", 4)) {
     elfldr_spawn("payload.elf", fd, elf);
   }
 
-  free(elf);
+  munmap(elf, size);
 }
 
 
