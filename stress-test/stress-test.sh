@@ -25,5 +25,5 @@ sleep 3
 
 for i in {1..5000}
 do
-    make getpid_test || exit 1
+    make test || exit 1
 done

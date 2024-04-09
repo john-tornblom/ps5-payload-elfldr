@@ -18,20 +18,18 @@ PS5_HOST ?= ps5
 PS5_PORT ?= 9021
 
 ifdef PS5_PAYLOAD_SDK
-    include $(PS5_PAYLOAD_SDK)/make/x86_64-ps5-payload.inc
+    include $(PS5_PAYLOAD_SDK)/make/toolchain.mk
 else
     $(error PS5_PAYLOAD_SDK is undefined)
 endif
 
-LDADD += -lkernel_web
-
 all: getpid_test.elf
 
-getpid_test.elf: getpid_test.o
-	$(LD) $^ $(LDADD) -o $@
+getpid_test.elf: getpid_test.c
+	$(CC) -o $@ $^
 
 clean:
-	rm -f *.o *.elf
+	rm -f *.elf
 
-getpid_test: getpid_test.elf
-	@nc -q0 $(PS5_HOST) $(PS5_PORT) < $^
+test: getpid_test.elf
+	$(PS5_DEPLOY) -h $(PS5_HOST) -p $(PS5_PORT) $^
